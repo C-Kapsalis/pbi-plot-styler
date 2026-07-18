@@ -1,0 +1,26 @@
+table 'Quality Measures'
+	lineageTag: 00000000-0000-0000-0000-0000000qm001
+
+	measure 'Avg Cupping Score' = AVERAGE ( Lots[Cupping Score] )
+		formatString: 0.0
+		lineageTag: 00000000-0000-0000-0000-0000000qm002
+
+	measure 'Defect Rate %' = DIVIDE ( SUM ( Lots[Defective Beans] ), SUM ( Lots[Sampled Beans] ) )
+		formatString: 0.0%
+		lineageTag: 00000000-0000-0000-0000-0000000qm003
+
+	column 'Dummy Key'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000qm004
+		summarizeBy: none
+		sourceColumn: dummy_key
+
+	partition 'Quality Measures' = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows ( {{1}}, {"dummy_key"} )
+				in
+				    Source
+
+	annotation PBI_Id = 0f1cea0ffee0000000000000000qm000

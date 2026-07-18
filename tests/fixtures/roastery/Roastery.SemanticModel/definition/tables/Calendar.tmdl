@@ -1,0 +1,23 @@
+table Calendar
+	lineageTag: 00000000-0000-0000-0000-0000000ca001
+
+	column Date
+		lineageTag: 00000000-0000-0000-0000-0000000ca002
+		summarizeBy: none
+		sourceColumn: date
+
+	column Month
+		lineageTag: 00000000-0000-0000-0000-0000000ca003
+		summarizeBy: none
+		sourceColumn: month
+
+	column Quarter
+		lineageTag: 00000000-0000-0000-0000-0000000ca004
+		summarizeBy: none
+		sourceColumn: quarter
+
+	partition Calendar = calculated
+		mode: import
+		source = CALENDARAUTO ()
+
+	annotation PBI_Id = 0f1cea0ffee0000000000000000ca000

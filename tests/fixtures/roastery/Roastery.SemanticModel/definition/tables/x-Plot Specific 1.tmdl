@@ -1,0 +1,52 @@
+table 'x-Plot Specific 1'
+	lineageTag: 00000000-0000-0000-0000-00000000x101
+
+	column 'x-Plot Specific 1'
+		lineageTag: 00000000-0000-0000-0000-00000000x102
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'x-Plot Specific 1 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'x-Plot Specific 1 Fields'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Plot Specific 1 Fields'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-00000000x103
+		summarizeBy: none
+		sourceColumn: [Value2]
+		sortByColumn: 'x-Plot Specific 1 Order'
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Plot Specific 1 Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-00000000x104
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'x-Plot Specific 1' = calculated
+		mode: import
+		source =
+				{
+				    -- time_x
+				    ( "Month", NAMEOF ( 'Calendar'[Month] ), 10, "time_x" ),
+				    ( "Quarter", NAMEOF ( 'Calendar'[Quarter] ), 20, "time_x" ),
+
+				    -- bean_x
+				    ( "Origin Country", NAMEOF ( 'Beans'[Origin Country] ), 30, "bean_x" ),
+				    ( "Roast Level", NAMEOF ( 'Beans'[Roast Level] ), 40, "bean_x" )
+				}
+
+	annotation PBI_Id = 0f1cea0ffee00000000000000000x100

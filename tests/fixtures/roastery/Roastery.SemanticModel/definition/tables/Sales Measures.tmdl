@@ -1,0 +1,46 @@
+table 'Sales Measures'
+	lineageTag: 00000000-0000-0000-0000-0000000sm001
+
+	measure 'Bags Sold #' = SUM ( Orders[Bags] )
+		formatString: #,##0
+		lineageTag: 00000000-0000-0000-0000-0000000sm002
+
+	measure Revenue = SUMX ( Orders, Orders[Bags] * Orders[Unit Price] )
+		formatString: #,##0 EUR
+		lineageTag: 00000000-0000-0000-0000-0000000sm003
+
+	measure 'Cost of Goods' = SUMX ( Orders, Orders[Bags] * Orders[Unit Cost] )
+		formatString: #,##0 EUR
+		lineageTag: 00000000-0000-0000-0000-0000000sm004
+
+	measure 'Wholesale Margin %' = DIVIDE ( [Revenue] - [Cost of Goods], [Revenue] )
+		formatString: 0.0%
+		lineageTag: 00000000-0000-0000-0000-0000000sm005
+
+	measure 'Sample Requests #' = COUNTROWS ( FILTER ( Orders, Orders[Is Sample] = TRUE () ) )
+		formatString: #,##0
+		lineageTag: 00000000-0000-0000-0000-0000000sm006
+
+	measure 'Retired Blend Sales' = CALCULATE ( [Revenue], Beans[Is Retired] = TRUE () )
+		formatString: #,##0 EUR
+		lineageTag: 00000000-0000-0000-0000-0000000sm007
+
+	measure 'Legacy Subscriptions #' = COUNTROWS ( FILTER ( Orders, Orders[Channel] = "Legacy Subscription" ) )
+		formatString: #,##0
+		lineageTag: 00000000-0000-0000-0000-0000000sm008
+
+	column 'Dummy Key'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000sm009
+		summarizeBy: none
+		sourceColumn: dummy_key
+
+	partition 'Sales Measures' = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows ( {{1}}, {"dummy_key"} )
+				in
+				    Source
+
+	annotation PBI_Id = 0f1cea0ffee0000000000000000sm000

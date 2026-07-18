@@ -1,0 +1,49 @@
+table 'x-Plot Specific 2'
+	lineageTag: 00000000-0000-0000-0000-00000000x201
+
+	column 'x-Plot Specific 2'
+		lineageTag: 00000000-0000-0000-0000-00000000x202
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'x-Plot Specific 2 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'x-Plot Specific 2 Fields'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Plot Specific 2 Fields'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-00000000x203
+		summarizeBy: none
+		sourceColumn: [Value2]
+		sortByColumn: 'x-Plot Specific 2 Order'
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Plot Specific 2 Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-00000000x204
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'x-Plot Specific 2' = calculated
+		mode: import
+		source =
+				{
+				    -- order_x
+				    ( "Channel", NAMEOF ( 'Orders'[Channel] ), 10, "order_x" ),
+				    ( "Brew Method", NAMEOF ( 'Orders'[Brew Method] ), 20, "order_x" ),
+				    ( "Grind", NAMEOF ( Orders[Grind] ), 30, "order_x" )
+				}
+
+	annotation PBI_Id = 0f1cea0ffee00000000000000000x200

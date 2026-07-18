@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pbi-plot-styler"
+version = "0.1.0"
+description = "Make every Power BI combo chart presentation-ready: rebuild line colors and data-label formatting from your model's field parameters, with one command."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Christoforos Kapsalis" }]
+requires-python = ">=3.10"
+keywords = ["power-bi", "pbip", "field-parameters", "formatting", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "click>=8.0",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+pbi-plot-styler = "pbi_plot_styler.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pbi_plot_styler"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

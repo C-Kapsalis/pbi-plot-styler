@@ -1,0 +1,51 @@
+table Orders
+	lineageTag: 00000000-0000-0000-0000-0000000or001
+
+	column Channel
+		lineageTag: 00000000-0000-0000-0000-0000000or002
+		summarizeBy: none
+		sourceColumn: channel
+
+	column 'Brew Method'
+		lineageTag: 00000000-0000-0000-0000-0000000or003
+		summarizeBy: none
+		sourceColumn: brew_method
+
+	column Grind
+		lineageTag: 00000000-0000-0000-0000-0000000or004
+		summarizeBy: none
+		sourceColumn: grind
+
+	column Bags
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or005
+		summarizeBy: sum
+		sourceColumn: bags
+
+	column 'Unit Price'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or006
+		summarizeBy: none
+		sourceColumn: unit_price
+
+	column 'Unit Cost'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or007
+		summarizeBy: none
+		sourceColumn: unit_cost
+
+	column 'Is Sample'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or008
+		summarizeBy: none
+		sourceColumn: is_sample
+
+	partition Orders = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document ( File.Contents ( "orders.csv" ) )
+				in
+				    Source
+
+	annotation PBI_Id = 0f1cea0ffee0000000000000000or000

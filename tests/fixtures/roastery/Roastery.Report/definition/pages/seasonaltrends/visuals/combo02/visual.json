@@ -1,0 +1,90 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "combo02",
+  "position": {
+    "x": 24,
+    "y": 96,
+    "z": 0,
+    "height": 420,
+    "width": 900,
+    "tabOrder": 1000
+  },
+  "visual": {
+    "visualType": "lineClusteredColumnComboChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Calendar"
+                    }
+                  },
+                  "Property": "Quarter"
+                }
+              },
+              "queryRef": "Calendar.Quarter",
+              "nativeQueryRef": "Quarter",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Quality Measures"
+                    }
+                  },
+                  "Property": "Avg Cupping Score"
+                }
+              },
+              "queryRef": "Quality Measures.Avg Cupping Score",
+              "nativeQueryRef": "Avg Cupping Score"
+            }
+          ],
+          "fieldParameters": [
+            {
+              "parameterExpr": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "y-Plot Specific"
+                    }
+                  },
+                  "Property": "y-Plot Specific"
+                }
+              },
+              "index": 0,
+              "length": 1
+            }
+          ]
+        },
+        "Y2": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Sales Measures"
+                    }
+                  },
+                  "Property": "Wholesale Margin %"
+                }
+              },
+              "queryRef": "Sales Measures.Wholesale Margin %",
+              "nativeQueryRef": "Wholesale Margin %"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

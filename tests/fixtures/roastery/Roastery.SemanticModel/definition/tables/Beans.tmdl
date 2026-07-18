@@ -1,0 +1,28 @@
+table Beans
+	lineageTag: 00000000-0000-0000-0000-0000000bn001
+
+	column 'Origin Country'
+		lineageTag: 00000000-0000-0000-0000-0000000bn002
+		summarizeBy: none
+		sourceColumn: origin_country
+
+	column 'Roast Level'
+		lineageTag: 00000000-0000-0000-0000-0000000bn003
+		summarizeBy: none
+		sourceColumn: roast_level
+
+	column 'Is Retired'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000bn004
+		summarizeBy: none
+		sourceColumn: is_retired
+
+	partition Beans = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document ( File.Contents ( "beans.csv" ) )
+				in
+				    Source
+
+	annotation PBI_Id = 0f1cea0ffee0000000000000000bn000
