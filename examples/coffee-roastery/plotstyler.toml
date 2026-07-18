@@ -1,0 +1,33 @@
+# pbi-plot-styler config for the coffee-roastery demo.
+#
+# Styles the line-and-clustered-column combo chart so that every measure
+# exposed by the `x-Plot Specific 2` field parameter renders with a GREEN
+# line/column fill and a data label in WHITE text on the same GREEN
+# background. This is the "after" state of the before/after demo: no colours
+# or labels set by hand in Power BI, all applied by declaration.
+#
+# Run it from this folder:
+#     pbi-plot-styler Roastery.Report
+# or preview first:
+#     pbi-plot-styler Roastery.Report --dry-run
+#
+# NOTE: the report must be saved in the *enhanced* PBIR format (a
+# definition/pages/**/visual.json tree). In Power BI Desktop enable
+# File > Options > Preview features > "Store reports using enhanced metadata
+# format", then re-save. A legacy report.json (one stringified `config`
+# blob) has no per-visual files for the styler to rewrite.
+
+[tables]
+# Only measures reachable through this field parameter get styled.
+field_parameters = ["x-Plot Specific 2"]
+
+[targets]
+# Both combo variants — a saved combo chart may be either stacked or clustered.
+visual_types = ["lineClusteredColumnComboChart", "lineStackedColumnComboChart"]
+
+[style]
+line_color = "#107C10"        # green line + column fill
+label_color = "#FFFFFF"       # white data-label text
+label_background = "#107C10"  # green data-label background
+label_transparency = 0        # fully opaque green
+show_labels = true

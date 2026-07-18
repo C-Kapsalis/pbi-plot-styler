@@ -1,0 +1,53 @@
+table Calendar
+	lineageTag: 00000000-0000-0000-0000-0000000ca001
+
+	column Date
+		dataType: dateTime
+		isKey
+		formatString: yyyy-mm-dd
+		lineageTag: 00000000-0000-0000-0000-0000000ca002
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column Month
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000ca003
+		summarizeBy: none
+		sourceColumn: Month
+		sortByColumn: 'Month Order'
+
+		annotation SummarizationSetBy = Automatic
+
+	column Quarter
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000ca004
+		summarizeBy: none
+		sourceColumn: Quarter
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Month Order'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-0000000ca005
+		summarizeBy: sum
+		sourceColumn: Month Order
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Calendar = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("TdBNC4MwDAbg/9KzgzatX8fB2EFwY+woHlSKl6EyVNi/X7o0LlBeCg8h4W0aBRrcSRt8KlFVN2E+wteoNmEF0qvvWUGoJa27N6sV6kjPy08BwwlNefbDmgrN4lXbxJoJzVlfQS1GLrSIe7eRtRBakj79wlr+1WjS+7AGdaENLTiWdZv3g0VbJrZ18cPBWFf7BQ==", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [#"Date" = _t, #"Month" = _t, #"Quarter" = _t, #"Month Order" = _t]),
+				    #"Changed Type" = Table.TransformColumnTypes(Source, {{"Date", type datetime}, {"Month", type text}, {"Quarter", type text}, {"Month Order", Int64.Type}})
+				in
+				    #"Changed Type"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

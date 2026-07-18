@@ -1,0 +1,16 @@
+relationship 00000000-0000-0000-0000-0000000re001
+	fromColumn: Orders.Date
+	toColumn: Calendar.Date
+
+relationship 00000000-0000-0000-0000-0000000re002
+	fromColumn: Orders.Bean
+	toColumn: Beans.Bean
+
+relationship 00000000-0000-0000-0000-0000000re003
+	fromColumn: Lots.Date
+	toColumn: Calendar.Date
+
+relationship 00000000-0000-0000-0000-0000000re004
+	fromColumn: Lots.Bean
+	toColumn: Beans.Bean
+

@@ -162,6 +162,29 @@ option parsing with `--`) so it is not read as a flag:
 pbi-plot-styler "./-Sales.Report"
 ```
 
+## Try it on the bundled example
+
+[`examples/coffee-roastery/`](examples/coffee-roastery/) is a complete,
+openable PBIP project (fictional, inline data — refreshes offline with no data
+source) shipped **deliberately unstyled**, so you can watch the styler change
+it. Preview the rewrite without touching anything:
+
+```bash
+# bash / macOS / Linux
+pbi-plot-styler examples/coffee-roastery/Roastery.Report --dry-run
+```
+
+```powershell
+# PowerShell / Windows
+pbi-plot-styler examples\coffee-roastery\Roastery.Report --dry-run
+```
+
+To *see* the before/after in Power BI Desktop — open the unstyled charts, run
+the styler on a copy, reopen the styled charts — follow the walkthrough in the
+[example's README](examples/coffee-roastery/README.md). The styler runs
+anywhere Python does; only the "open the `.pbip` to look at it" step needs
+Windows with Power BI Desktop.
+
 ## Configuration
 
 Every knob is a CLI flag and a `plotstyler.toml` key (auto-loaded from the
@@ -171,7 +194,7 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 | TOML key | CLI flag | Default | Controls |
 |---|---|---|---|
 | `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling |
-| `targets.visual_types` | `--visual-type` (repeatable) | `lineClusteredColumnComboChart` | Which `visualType` values get restyled |
+| `targets.visual_types` | `--visual-type` (repeatable) | `lineClusteredColumnComboChart`, `lineStackedColumnComboChart` | Which `visualType` values get restyled |
 | `style.line_color` | `--line-color` | `#118DFF` | Series fill (line and columns) for every measure |
 | `style.palette` | `--palette` (repeatable) | empty | Colors cycled per measure (sorted order); overrides `line_color` when set |
 | `style.label_color` | `--label-color` | `#252423` | Data-label text color |

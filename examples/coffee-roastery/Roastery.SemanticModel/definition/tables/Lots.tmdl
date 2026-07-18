@@ -1,0 +1,64 @@
+table Lots
+	lineageTag: 00000000-0000-0000-0000-0000000lt001
+
+	column Date
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-mm-dd
+		lineageTag: 00000000-0000-0000-0000-0000000lt002
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column Bean
+		dataType: string
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000lt003
+		summarizeBy: none
+		sourceColumn: Bean
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Cupping Score'
+		dataType: double
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000lt004
+		summarizeBy: none
+		sourceColumn: Cupping Score
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Defective Beans'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-0000000lt005
+		summarizeBy: sum
+		sourceColumn: Defective Beans
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Sampled Beans'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-0000000lt006
+		summarizeBy: sum
+		sourceColumn: Sampled Beans
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Lots = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("hdBBC4MgFMDxryKdm6iZ1XUw6DKCdYwOgdIEsZG1z7/XZIehGJgvhP/h94YhY4TxC6Fwsjzrd7tqp1C77HBfjbISXmsGV3l8hGRj/muYb+5aWj0/N3Rzr1U5t3wLXMOogqbwTQuBmaxEvbazUahb9aztERZYwGiCkPuwMxK10/pWbkMP5RT8HRXHHAalQVYmXSWOy0RCJqKu6szFoqo6qfJLjKiapMqvMFBRklD5BQYuSs9cfoWBjLKkTPy5xg8=", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [#"Date" = _t, #"Bean" = _t, #"Cupping Score" = _t, #"Defective Beans" = _t, #"Sampled Beans" = _t]),
+				    #"Changed Type" = Table.TransformColumnTypes(Source, {{"Date", type datetime}, {"Bean", type text}, {"Cupping Score", type number}, {"Defective Beans", Int64.Type}, {"Sampled Beans", Int64.Type}})
+				in
+				    #"Changed Type"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

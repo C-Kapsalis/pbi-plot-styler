@@ -1,0 +1,50 @@
+table Beans
+	lineageTag: 00000000-0000-0000-0000-0000000bn001
+
+	column Bean
+		dataType: string
+		isKey
+		lineageTag: 00000000-0000-0000-0000-0000000bn002
+		summarizeBy: none
+		sourceColumn: Bean
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Origin Country'
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000bn003
+		summarizeBy: none
+		sourceColumn: Origin Country
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Roast Level'
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000bn004
+		summarizeBy: none
+		sourceColumn: Roast Level
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Is Retired'
+		dataType: boolean
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000bn005
+		summarizeBy: none
+		sourceColumn: Is Retired
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Beans = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("VY4xDsIwDEWvEmXuKQoVGagq0bHqYBTTWrhJZScMnB7DRBfrSf/9L0+TH2sSUnQhV7stY4q+8a3Am9igx0h1M3gAK/q5mXxPMdGyFtfpLqiaLe3KSnknMDyDPA9+MJkhRTdSWhjdILRQMuWUOW/3X+n6HTy0Bo4ugLxQi7uhopHllwoFN2D4f61Itc78AQ==", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [#"Bean" = _t, #"Origin Country" = _t, #"Roast Level" = _t, #"Is Retired" = _t]),
+				    #"Changed Type" = Table.TransformColumnTypes(Source, {{"Bean", type text}, {"Origin Country", type text}, {"Roast Level", type text}, {"Is Retired", type logical}})
+				in
+				    #"Changed Type"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

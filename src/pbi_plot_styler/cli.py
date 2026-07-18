@@ -67,7 +67,7 @@ class StylerError(click.ClickException):
     "visual_types",
     multiple=True,
     help="visualType to restyle (repeatable). Default: "
-    "lineClusteredColumnComboChart.",
+    "lineClusteredColumnComboChart and lineStackedColumnComboChart.",
 )
 @click.option(
     "--line-color",

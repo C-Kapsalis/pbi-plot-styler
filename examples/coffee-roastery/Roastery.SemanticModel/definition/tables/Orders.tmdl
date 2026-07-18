@@ -1,0 +1,96 @@
+table Orders
+	lineageTag: 00000000-0000-0000-0000-0000000or001
+
+	column Date
+		dataType: dateTime
+		isHidden
+		formatString: yyyy-mm-dd
+		lineageTag: 00000000-0000-0000-0000-0000000or002
+		summarizeBy: none
+		sourceColumn: Date
+
+		annotation SummarizationSetBy = Automatic
+
+	column Bean
+		dataType: string
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or003
+		summarizeBy: none
+		sourceColumn: Bean
+
+		annotation SummarizationSetBy = Automatic
+
+	column Channel
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000or004
+		summarizeBy: none
+		sourceColumn: Channel
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Brew Method'
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000or005
+		summarizeBy: none
+		sourceColumn: Brew Method
+
+		annotation SummarizationSetBy = Automatic
+
+	column Grind
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000or006
+		summarizeBy: none
+		sourceColumn: Grind
+
+		annotation SummarizationSetBy = Automatic
+
+	column Bags
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-0000000or007
+		summarizeBy: sum
+		sourceColumn: Bags
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Unit Price'
+		dataType: double
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or008
+		summarizeBy: none
+		sourceColumn: Unit Price
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Unit Cost'
+		dataType: double
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or009
+		summarizeBy: none
+		sourceColumn: Unit Cost
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Is Sample'
+		dataType: boolean
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000or010
+		summarizeBy: none
+		sourceColumn: Is Sample
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Orders = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("lZbBb4IwFMb/FcLZGShtqVeXbV4Wk3nYwXhgo2qTppgWtn9/1YhDaftKQkrl8H3ve/T3cLtNUYbwU5bbK52lm05pYXiyajq7LiVXtX36eWwkN5Xkdv9iTpob0/SPkyWvlP2BC7vkeE7sjc2RXfeVNDzdzR4s3kWtxOHYJgOlTfdlvrU4taI5a70K2XJtN2+66S4VIHpWpxdt5tBGfu1h8WNhTKGyr9IrqysrVScboQ429lqLg1Dj2p8bWSdLzX8fG4RYOEIB+AxzeE3wAopztVlbgVWlf7hpkw9uuN2Nswy6eGtYkYVj4JC+5yDdxAmCysehc+o7RnctKtB9gFZ3QwMSC4JbnRAoAYnGYPiW//uPw/2ncSQ4tQmDiqfTYPANiwLAuZzAgs+D5lCYcgIK48lRADyzWBDG0hRDpbMJGPiHRRYkYRFLgteAllCORTQMrnGBUfAV5FkcCy7pMgNK78VjUXCPCxymOc8ngOB2KKHvcu8RhYFzbOAwzTmKJcGpXkJf6F4/Cgbv3xfmYmH3Bw==", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [#"Date" = _t, #"Bean" = _t, #"Channel" = _t, #"Brew Method" = _t, #"Grind" = _t, #"Bags" = _t, #"Unit Price" = _t, #"Unit Cost" = _t, #"Is Sample" = _t]),
+				    #"Changed Type" = Table.TransformColumnTypes(Source, {{"Date", type datetime}, {"Bean", type text}, {"Channel", type text}, {"Brew Method", type text}, {"Grind", type text}, {"Bags", Int64.Type}, {"Unit Price", type number}, {"Unit Cost", type number}, {"Is Sample", type logical}})
+				in
+				    #"Changed Type"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

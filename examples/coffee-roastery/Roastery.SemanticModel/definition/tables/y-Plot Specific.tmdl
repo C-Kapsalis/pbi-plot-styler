@@ -1,0 +1,60 @@
+table 'y-Plot Specific'
+	lineageTag: 00000000-0000-0000-0000-00000000y001
+
+	column 'y-Plot Specific'
+		lineageTag: 00000000-0000-0000-0000-00000000y002
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'y-Plot Specific Order'
+
+		relatedColumnDetails
+			groupByColumn: 'y-Plot Specific Fields'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'y-Plot Specific Fields'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-00000000y003
+		summarizeBy: none
+		sourceColumn: [Value2]
+		sortByColumn: 'y-Plot Specific Order'
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'y-Plot Specific Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-00000000y004
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'y-Plot Specific Field Category'
+		lineageTag: 00000000-0000-0000-0000-00000000y005
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'y-Plot Specific' = calculated
+		mode: import
+		source =
+				{
+				    -- Blank Dimension_y
+				    ("  ", NAMEOF('Sales Measures'[z]), -1, "Blank Dimension_y"),
+				
+				    -- order_x
+				    ( "Channel", NAMEOF ( 'Orders'[Channel] ), 10, "order_x" ),
+				    ( "Brew Method", NAMEOF ( 'Orders'[Brew Method] ), 20, "order_x" ),
+				    ( "Grind", NAMEOF ( Orders[Grind] ), 30, "order_x" )
+				}
+
+	annotation PBI_Id = 0f1cea0ffee00000000000000000y000
+

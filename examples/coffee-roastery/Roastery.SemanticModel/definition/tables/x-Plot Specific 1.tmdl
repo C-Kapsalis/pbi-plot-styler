@@ -1,0 +1,67 @@
+table 'x-Plot Specific 1'
+	lineageTag: 00000000-0000-0000-0000-00000000x101
+
+	column 'x-Plot Specific 1'
+		lineageTag: 00000000-0000-0000-0000-00000000x102
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'x-Plot Specific 1 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'x-Plot Specific 1 Fields'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Plot Specific 1 Fields'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-00000000x103
+		summarizeBy: none
+		sourceColumn: [Value2]
+		sortByColumn: 'x-Plot Specific 1 Order'
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'x-Plot Specific 1 Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-00000000x104
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+		annotation SummarizationSetBy = Automatic
+
+	column Value4
+		lineageTag: 2abca409-e143-4c00-b900-7850aa8c15de
+		summarizeBy: none
+		isNameInferred
+		sourceColumn: [Value4]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'x-Plot Specific 1' = calculated
+		mode: import
+		source =
+				{
+				
+				    -- sales_y
+				    ( "Bags Sold #", NAMEOF ( [Bags Sold #] ), 10, "sales_y" ),
+				    ( "Revenue", NAMEOF ( 'Sales Measures'[Revenue] ), 20, "sales_y" ),
+				    ( "Wholesale Margin %", NAMEOF ( 'Sales Measures'[Wholesale Margin %] ), 40, "sales_y" ),
+				
+				    -- quality_y
+				    ( "Avg Cupping Score", NAMEOF ( [Avg Cupping Score] ), 30, "quality_y" ),
+				
+				    -- retired measures stay parked here, commented out
+				    -- ( "Retired Blend Sales", NAMEOF ( [Retired Blend Sales] ), 50, "sales_y" ),
+				    // ( "Legacy Subscriptions #", NAMEOF ( 'Sales Measures'[Legacy Subscriptions #] ), 60, "sales_y" ),
+				    ( "Sample Requests #", NAMEOF ( [Sample Requests #] ), 70, "sales_y" )
+				}
+
+	annotation PBI_Id = 0f1cea0ffee00000000000000000x100
+

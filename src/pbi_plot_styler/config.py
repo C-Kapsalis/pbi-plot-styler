@@ -20,7 +20,10 @@ DEFAULT_FIELD_PARAMETER_TABLES: tuple[str, ...] = (
     "x-Plot Specific 2",
     "y-Plot Specific",
 )
-DEFAULT_VISUAL_TYPES: tuple[str, ...] = ("lineClusteredColumnComboChart",)
+DEFAULT_VISUAL_TYPES: tuple[str, ...] = (
+    "lineClusteredColumnComboChart",
+    "lineStackedColumnComboChart",
+)
 DEFAULT_LINE_COLOR = "#118DFF"
 DEFAULT_LABEL_COLOR = "#252423"
 DEFAULT_LABEL_TRANSPARENCY = 20

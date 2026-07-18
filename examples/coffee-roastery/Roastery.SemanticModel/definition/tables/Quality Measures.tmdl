@@ -1,0 +1,26 @@
+table 'Quality Measures'
+	lineageTag: 00000000-0000-0000-0000-0000000qm001
+
+	measure 'Avg Cupping Score' = AVERAGE ( Lots[Cupping Score] )
+		formatString: 0.0
+		lineageTag: 00000000-0000-0000-0000-0000000qm002
+
+	measure 'Defect Rate %' = DIVIDE ( SUM ( Lots[Defective Beans] ), SUM ( Lots[Sampled Beans] ) )
+		formatString: 0.0%
+		lineageTag: 00000000-0000-0000-0000-0000000qm003
+
+	partition 'Quality Measures' = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("i45WUlCKjQUA", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [z = _t]),
+				    #"Removed Columns" = Table.RemoveColumns(Source,{"z"})
+				in
+				    #"Removed Columns"
+
+	annotation PBI_Id = 0f1cea0ffee0000000000000000qm000
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+
