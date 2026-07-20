@@ -16,6 +16,13 @@
 # File > Options > Preview features > "Store reports using enhanced metadata
 # format", then re-save. A legacy report.json (one stringified `config`
 # blob) has no per-visual files for the styler to rewrite.
+#
+# x-Plot Specific 1 (columns) and x-Plot Specific 2 (line) share the same
+# measure catalog here, so whichever measure is currently selected on the
+# columns would otherwise inherit the line's green styling too, since Power
+# BI matches a styling rule by measure name, not by which selector picked
+# it. exclude_current_roles below leaves out whatever is presently on Y
+# (the columns), on every run.
 
 [tables]
 # Only measures reachable through this field parameter get styled.
@@ -24,6 +31,8 @@ field_parameters = ["x-Plot Specific 2"]
 [targets]
 # Both combo variants — a saved combo chart may be either stacked or clustered.
 visual_types = ["lineClusteredColumnComboChart", "lineStackedColumnComboChart"]
+# Never let the columns' current measure inherit the line's styling.
+exclude_current_roles = ["Y"]
 
 [style]
 line_color = "#107C10"        # green line + column fill
