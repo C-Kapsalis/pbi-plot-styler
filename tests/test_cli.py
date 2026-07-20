@@ -172,6 +172,27 @@ def test_config_file_overrides(project, report_dir, tmp_path):
     )
 
 
+def test_typo_d_config_key_fails_loudly(report_dir, tmp_path):
+    # A hyphen instead of an underscore (matching the --line-color flag's
+    # own spelling) used to be silently ignored: the file parsed, the key
+    # was skipped, and the run reported nothing had changed.
+    config_file = tmp_path / "plotstyler.toml"
+    config_file.write_text('[style]\nline-color = "#FF0000"\n', encoding="utf-8")
+
+    result = _run(report_dir, "--config", config_file)
+    assert result.exit_code == 2
+    assert "line-color" in result.output
+
+
+def test_typo_d_config_section_fails_loudly(report_dir, tmp_path):
+    config_file = tmp_path / "plotstyler.toml"
+    config_file.write_text('[Style]\nline_color = "#FF0000"\n', encoding="utf-8")
+
+    result = _run(report_dir, "--config", config_file)
+    assert result.exit_code == 2
+    assert "Style" in result.output
+
+
 def test_cli_flags_beat_config_file(report_dir, tmp_path):
     config_file = tmp_path / "plotstyler.toml"
     config_file.write_text('[style]\nline_color = "#123456"\n', encoding="utf-8")

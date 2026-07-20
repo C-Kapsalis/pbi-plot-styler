@@ -111,6 +111,39 @@ class StylerConfig:
         return self.line_color_for(measure_index)
 
 
+_KNOWN_SECTIONS = {"tables", "targets", "style"}
+_KNOWN_TABLES_KEYS = {"field_parameters"}
+_KNOWN_TARGETS_KEYS = {"visual_types"}
+_KNOWN_STYLE_KEYS = {
+    "line_color",
+    "palette",
+    "label_color",
+    "label_background",
+    "label_transparency",
+    "show_labels",
+}
+
+
+def _reject_unknown_keys(
+    path: Path, section: str, present: dict, known: set[str]
+) -> None:
+    """Fail loudly on a typo'd key instead of silently ignoring it.
+
+    A misspelled key (``line-color`` for ``line_color``, a wrong case on
+    a section name) previously just vanished: the value was never read,
+    no default was overridden, and the tool reported nothing had
+    changed. That reads as "the config had no effect" with zero signal
+    of why.
+    """
+    unknown = set(present) - known
+    if unknown:
+        raise ConfigError(
+            f"{path} has unknown key(s) under [{section}]: "
+            f"{', '.join(sorted(unknown))}. Valid keys are: "
+            f"{', '.join(sorted(known))}."
+        )
+
+
 def load_config_file(path: Path) -> dict[str, Any]:
     """Read a plotstyler.toml file into a flat override dict."""
     try:
@@ -120,16 +153,27 @@ def load_config_file(path: Path) -> dict[str, Any]:
             f"{path} is not valid TOML: {exc}. Fix the syntax and rerun."
         ) from exc
 
+    unknown_sections = set(raw) - _KNOWN_SECTIONS
+    if unknown_sections:
+        raise ConfigError(
+            f"{path} has unknown section(s): "
+            f"{', '.join(sorted(unknown_sections))}. Valid sections are "
+            f"[tables], [targets], and [style]."
+        )
+
     overrides: dict[str, Any] = {}
     tables = raw.get("tables", {})
+    _reject_unknown_keys(path, "tables", tables, _KNOWN_TABLES_KEYS)
     if "field_parameters" in tables:
         overrides["field_parameter_tables"] = tuple(tables["field_parameters"])
 
     targets = raw.get("targets", {})
+    _reject_unknown_keys(path, "targets", targets, _KNOWN_TARGETS_KEYS)
     if "visual_types" in targets:
         overrides["visual_types"] = tuple(targets["visual_types"])
 
     style = raw.get("style", {})
+    _reject_unknown_keys(path, "style", style, _KNOWN_STYLE_KEYS)
     for key in (
         "line_color",
         "label_color",
