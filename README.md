@@ -12,11 +12,14 @@ alike, and every style decision has to be re-made twenty times.
 
 There is a better shape for recurring, metric-by-metric performance
 reporting: **one page, driven by three field parameters** declared in the
-semantic model:
+semantic model. `BI-report-template-site` is where that pattern is taught
+end to end, as a live, clickable demo aimed at a reader with no data team;
+this tool is what keeps a report that follows it presentation-ready as
+measures are added. The three parameter tables:
 
 | Table | Role in the chart | Contents |
 |---|---|---|
-| `x-Plot Specific 1` | Axis | Every dimension a chart can be sliced by — time grains first, then entity attributes (`Month`, `Quarter`, `Origin Country`, …) |
+| `x-Plot Specific 1` | Axis | Every dimension a chart can be sliced by, time grains first, then entity attributes (`Month`, `Quarter`, `Origin Country`, …) |
 | `x-Plot Specific 2` | Legend | Every dimension a chart can be split into series (`Channel`, `Brew Method`, …) |
 | `y-Plot Specific` | Values | Every measure a chart can display (`Revenue`, `Bags Sold #`, …) |
 
@@ -34,11 +37,11 @@ The economics invert:
 - **No per-visual hand-formatting.** Content lives in the model; the page is
   a generic lens over it.
 - **Plots are always presentation-ready.** Same colors, same labels, same
-  backgrounds — screenshot any composition straight into a deck.
+  backgrounds, screenshot any composition straight into a deck.
 - **The plottable surface is reviewable.** The parameter tables are readable
   DAX in version control; adding a measure is a one-line diff.
 
-Declaring a parameter is ordinary TMDL — a calculated table of
+Declaring a parameter is ordinary TMDL, a calculated table of
 `( display name, NAMEOF ( field ), sort ordinal, category )` tuples
 (adapted from [the test fixture](tests/fixtures/roastery/Roastery.SemanticModel/definition/tables/y-Plot%20Specific.tmdl)):
 
@@ -57,13 +60,13 @@ Declaring a parameter is ordinary TMDL — a calculated table of
 				}
 ```
 
-`NAMEOF` makes the rows references, not strings — rename a measure and the
-parameter follows. Space the ordinals so you can insert without renumbering;
-comment out retirements instead of deleting them. The full table declaration
-(three columns plus this partition) is in the
-[getting-started tutorial](docs/tutorials/getting-started.md).
+`NAMEOF` makes the rows references, not strings, so renaming a measure
+updates the parameter automatically. Space the ordinals so you can insert
+without renumbering; comment out retirements instead of deleting them. The
+full table declaration (three columns plus this partition) is in the
+[documentation](#documentation) below.
 
-## The catch — and the CLI
+## The catch, and the CLI
 
 One thing field parameters cannot reach: **per-measure formatting**. Power BI
 stores series colors and data-label backgrounds as selector arrays inside
@@ -76,10 +79,10 @@ The CLI reads the measures your field-parameter tables declare and rebuilds,
 for every `lineClusteredColumnComboChart` in the report, exactly two arrays
 under `visual.objects`:
 
-- **`dataPoint[]`** — one entry per measure, binding the series fill (line
+- **`dataPoint[]`**, one entry per measure, binding the series fill (line
   and columns alike) to your hex color via
   `selector.metadata = "<Table>.<Measure>"`.
-- **`labels[]`** — a leading entry that switches data labels on, sets the
+- **`labels[]`**, a leading entry that switches data labels on, sets the
   text color, and sets `enableBackground: true` (without which Power BI
   ignores every per-measure background), then one entry per measure with its
   `backgroundColor` and `backgroundTransparency`.
@@ -123,7 +126,7 @@ hand-formatted entry for a retired measure:
 
 The dead `Retired Blend Sales` entry (commented out in the parameter table)
 is gone; every live measure gets a fill and a label background. Everything
-else in the file — queries, position, other `objects` — is preserved
+else in the file (queries, position, other `objects`) is preserved
 verbatim.
 
 ## Install
@@ -152,7 +155,7 @@ Measures: 5 drive the styling
 Restyled 2/2 visual(s); 0 already styled.
 ```
 
-Run it again and it reports `Restyled 0/2 visual(s); 2 already styled` — the
+Run it again and it reports `Restyled 0/2 visual(s); 2 already styled`, the
 command is safe to run after every model change, mechanically.
 
 If your report folder's name begins with a dash, prefix it with `./` (or end
@@ -165,7 +168,7 @@ pbi-plot-styler "./-Sales.Report"
 ## Try it on the bundled example
 
 [`examples/coffee-roastery/`](examples/coffee-roastery/) is a complete,
-openable PBIP project (fictional, inline data — refreshes offline with no data
+openable PBIP project (fictional, inline data, refreshes offline with no data
 source) shipped **deliberately unstyled**, so you can watch the styler change
 it. Preview the rewrite without touching anything:
 
@@ -179,11 +182,11 @@ pbi-plot-styler examples/coffee-roastery/Roastery.Report --dry-run
 pbi-plot-styler examples\coffee-roastery\Roastery.Report --dry-run
 ```
 
-To *see* the before/after in Power BI Desktop — open the unstyled charts, run
-the styler on a copy, reopen the styled charts — follow the walkthrough in the
-[example's README](examples/coffee-roastery/README.md). The styler runs
-anywhere Python does; only the "open the `.pbip` to look at it" step needs
-Windows with Power BI Desktop.
+To *see* the before and after in Power BI Desktop: open the unstyled charts,
+run the styler on a copy, then reopen the styled charts. The walkthrough for
+that is in [the example's README](examples/coffee-roastery/README.md). The
+styler itself runs anywhere Python does; only the "open the `.pbip` to look
+at it" step needs Windows with Power BI Desktop.
 
 ## Configuration
 
@@ -193,18 +196,20 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 
 | TOML key | CLI flag | Default | Controls |
 |---|---|---|---|
-| `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling |
+| `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling. Restrict this to just the table that feeds your line to style only the line — unless that table's measure catalog overlaps with the columns' table, in which case also set `exclude_current_roles` below. |
+| `tables.renames` | `--rename-table OLD=NEW` (repeatable) | none | Renames one table in the list above, leaving the other default names in place |
 | `targets.visual_types` | `--visual-type` (repeatable) | `lineClusteredColumnComboChart`, `lineStackedColumnComboChart` | Which `visualType` values get restyled |
+| `targets.exclude_current_roles` | `--exclude-role NAME` (repeatable) | none | Query role (for example `Y`, Power BI's internal name for the columns) whose currently-bound measure is excluded from styling, per visual. Needed when the line's and columns' field-parameter tables share measures, so the columns' current pick never inherits the line's styling. Re-reads the current binding on every run. |
 | `style.line_color` | `--line-color` | `#118DFF` | Series fill (line and columns) for every measure |
 | `style.palette` | `--palette` (repeatable) | empty | Colors cycled per measure (sorted order); overrides `line_color` when set |
 | `style.label_color` | `--label-color` | `#252423` | Data-label text color |
 | `style.label_background` | `--label-background` | match line color | Data-label background per measure |
 | `style.label_transparency` | `--label-transparency` | `20` | Background transparency, 0–100 |
 | `style.show_labels` | `--show-labels` / `--hide-labels` | `true` | Data labels on/off |
-| — | `--model DIR` | from `definition.pbir` | Semantic-model folder override |
-| — | `--config FILE` | `./plotstyler.toml` if present | Config file path |
-| — | `--dry-run` | off | Diff only; write nothing |
-| — | `--zip OUT.zip` | — | Also emit the styled report as an archive |
+| - | `--model DIR` | from `definition.pbir` | Semantic-model folder override |
+| - | `--config FILE` | `./plotstyler.toml` if present | Config file path |
+| - | `--dry-run` | off | Diff only; write nothing |
+| - | `--zip OUT.zip` | - | Also emit the styled report as an archive |
 
 A brand-color config looks like:
 
@@ -222,7 +227,7 @@ Exit codes are CI-grade:
 
 | Code | Meaning |
 |---|---|
-| `0` | Nothing to change — report matches the model and config |
+| `0` | Nothing to change, report matches the model and config |
 | `1` | Drift: at least one visual would change (`--dry-run` only) |
 | `2` | Error: bad config value, missing folder, unresolvable model, no measures |
 
@@ -233,20 +238,37 @@ styler fails until someone runs the one command.
 ## Zip output
 
 `--zip styled-report.zip` additionally writes the styled report folder as an
-archive (rooted at the folder name) — a shippable snapshot for whoever
+archive (rooted at the folder name), a shippable snapshot for whoever
 publishes. Combined with `--dry-run`, the archive contains the *styled*
 content while the source files stay untouched: a preview build.
 
 ## Documentation
 
-- [Getting started](docs/tutorials/getting-started.md) — declare the three
-  field parameters, build the combo-chart page, style it end to end.
-- [CLI reference](docs/reference/cli.md) — every argument, option, config
-  key, rewrite rule, and exit code.
-- [Field-parameter reporting](docs/explanation/field-parameter-reporting.md)
-  — why the template beats per-visual hand-formatting, the trade-offs, and a
-  combo-chart quirk worth knowing before you bind the same measure to both
-  axes.
+The full documentation (a tutorial that declares the three field parameters
+and styles a combo-chart page end to end, a CLI reference covering every
+argument, option, config key, and exit code, and an explanation of why the
+template beats per-visual hand-formatting) is published at
+`pbi-plot-styler-documentation` on Read the Docs.
+
+## Part of a small family of Power BI tools
+
+pbi-plot-styler is one of a few related, independently installable tools; a
+team adopts whichever ones it needs, not all of them.
+
+- [`tmdl-preflight`](https://github.com/C-Kapsalis/tmdl-preflight): a linter
+  and auto-fixer for a single TMDL-format model.
+- [`tmdl-drift-doctor`](https://github.com/C-Kapsalis/tmdl-drift-doctor):
+  keeps many derived models in sync with one shared template.
+- [`pbip-model-forge`](https://github.com/C-Kapsalis/pbip-model-forge):
+  builds a sample Power BI model from a plain-language description.
+- [`BI-report-template-site`](https://github.com/C-Kapsalis/BI-report-template-site):
+  not a tool, the live demo and documentation that teaches the one-canvas,
+  field-parameter reporting pattern this CLI keeps styled.
+
+## Contributing
+
+Contributions are welcome: new config keys, bug fixes, and documentation.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup.
 
 ## License
 

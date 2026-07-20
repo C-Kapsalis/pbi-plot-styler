@@ -90,6 +90,36 @@ def restyle_visual(
     return data
 
 
+def current_role_measure_key(visual_data: dict, role: str) -> str | None:
+    """The ``"<Entity>.<Property>"`` key presently bound to a query role.
+
+    Power BI's combo-chart roles are named ``Y`` (columns) and ``Y2``
+    (line) internally. A role bound through a field parameter still
+    resolves to one concrete measure at any given time; this reads that
+    current binding straight out of ``visual.query.queryState``, not the
+    field parameter's full catalog of options.
+
+    Returns ``None`` if the visual has no query state, the role isn't
+    present, or the role's projection isn't a measure (a dimension on
+    ``Category``/``Series``, for example).
+    """
+    query_state = (
+        ((visual_data.get("visual") or {}).get("query") or {}).get("queryState")
+        or {}
+    )
+    for projection in (query_state.get(role) or {}).get("projections", []):
+        measure = (projection.get("field") or {}).get("Measure")
+        if not measure:
+            continue
+        entity = ((measure.get("Expression") or {}).get("SourceRef") or {}).get(
+            "Entity"
+        )
+        prop = measure.get("Property")
+        if entity and prop:
+            return f"{entity}.{prop}"
+    return None
+
+
 # -- report traversal ---------------------------------------------------------
 def resolve_model_dir(report_dir: Path) -> Path:
     """Locate the semantic model paired with a report via ``definition.pbir``."""
@@ -174,7 +204,17 @@ def plan_changes(
             continue
         if (data.get("visual") or {}).get("visualType") not in config.visual_types:
             continue
-        new_data = restyle_visual(data, measure_keys, config)
+        excluded = {
+            current_role_measure_key(data, role)
+            for role in config.exclude_current_roles
+        }
+        excluded.discard(None)
+        visual_measure_keys = (
+            [k for k in measure_keys if k not in excluded]
+            if excluded
+            else measure_keys
+        )
+        new_data = restyle_visual(data, visual_measure_keys, config)
         changes.append(
             VisualChange(
                 path=visual_file,

@@ -63,11 +63,29 @@ class StylerError(click.ClickException):
     "'x-Plot Specific 1' / 'x-Plot Specific 2' / 'y-Plot Specific' trio.",
 )
 @click.option(
+    "--rename-table",
+    "renames",
+    multiple=True,
+    metavar="OLD=NEW",
+    help="Rename one default field-parameter table (repeatable), for "
+    "example --rename-table \"y-Plot Specific=Set Lines\". Leaves the "
+    "other default table names in place, unlike --table.",
+)
+@click.option(
     "--visual-type",
     "visual_types",
     multiple=True,
     help="visualType to restyle (repeatable). Default: "
     "lineClusteredColumnComboChart and lineStackedColumnComboChart.",
+)
+@click.option(
+    "--exclude-role",
+    "exclude_roles",
+    multiple=True,
+    help="Query role (repeatable), for example 'Y', whose currently-bound "
+    "measure is excluded from styling on each visual. Use this when the "
+    "line's field-parameter table shares measures with the columns' "
+    "table, so the columns' current pick never gets the line's styling.",
 )
 @click.option(
     "--line-color",
@@ -123,6 +141,8 @@ def main(
     model_dir: Path | None,
     config_path: Path | None,
     tables: tuple[str, ...],
+    renames: tuple[str, ...],
+    exclude_roles: tuple[str, ...],
     visual_types: tuple[str, ...],
     line_color: str | None,
     palette: tuple[str, ...],
@@ -144,11 +164,23 @@ def main(
         if default_config.is_file():
             config_path = default_config
 
+    table_renames: dict[str, str] = {}
+    for entry in renames:
+        name, sep, new_name = entry.partition("=")
+        if not sep or not name.strip() or not new_name.strip():
+            raise StylerError(
+                f"--rename-table {entry!r} is not in OLD=NEW form. "
+                f"For example: --rename-table \"y-Plot Specific=Set Lines\"."
+            )
+        table_renames[name.strip()] = new_name.strip()
+
     try:
         config = build_config(
             config_path,
+            table_renames=table_renames or None,
             field_parameter_tables=tuple(tables) or None,
             visual_types=tuple(visual_types) or None,
+            exclude_current_roles=tuple(exclude_roles) or None,
             line_color=line_color,
             palette=tuple(palette) or None,
             label_color=label_color,

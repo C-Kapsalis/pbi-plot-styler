@@ -123,6 +123,132 @@ def test_missing_field_parameter_tables_exit_2(report_dir):
     assert "No Such Table" in result.output
 
 
+# -- --exclude-role -----------------------------------------------------------------
+def test_exclude_role_drops_the_column_s_current_measure(report_dir):
+    # combo01's Y (columns) is currently bound to "Bags Sold #", which is
+    # also one of the 5 measures the field-parameter tables expose. Without
+    # --exclude-role it gets styled like every other measure, bleeding the
+    # line's styling onto the column that happens to share its name.
+    result = _run(report_dir, "--exclude-role", "Y")
+    assert result.exit_code == 0, result.output
+
+    data = _visual(report_dir, "monthlyperformance", "combo01")
+    styled = [
+        d["selector"]["metadata"]
+        for d in data["visual"]["objects"]["dataPoint"]
+    ]
+    assert "Sales Measures.Bags Sold #" not in styled
+    assert styled == [k for k in EXPECTED_KEYS if k != "Sales Measures.Bags Sold #"]
+
+    # combo02 has a different current Y measure (or none at all colliding
+    # with the configured set); its own styled list is unaffected by
+    # combo01's exclusion, since the check is per visual.
+    other = _visual(report_dir, "seasonaltrends", "combo02")
+    other_styled = [
+        d["selector"]["metadata"]
+        for d in other["visual"]["objects"]["dataPoint"]
+    ]
+    assert other_styled  # still gets styled; not silently emptied globally
+
+
+def test_exclude_role_tracks_the_current_binding_dynamically(report_dir):
+    # Move combo01's Y (columns) to a different measure and confirm the
+    # exclusion follows: the tool reads the *current* binding fresh on
+    # every run, it never remembers the old one.
+    path = (
+        report_dir / "definition" / "pages" / "monthlyperformance"
+        / "visuals" / "combo01" / "visual.json"
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["visual"]["query"]["queryState"]["Y"]["projections"][0]["field"]["Measure"][
+        "Property"
+    ] = "Revenue"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = _run(report_dir, "--exclude-role", "Y")
+    assert result.exit_code == 0, result.output
+
+    styled = [
+        d["selector"]["metadata"]
+        for d in _visual(report_dir, "monthlyperformance", "combo01")["visual"][
+            "objects"
+        ]["dataPoint"]
+    ]
+    assert "Sales Measures.Revenue" not in styled
+    assert "Sales Measures.Bags Sold #" in styled  # no longer excluded
+
+
+def test_exclude_role_still_idempotent(report_dir):
+    _run(report_dir, "--exclude-role", "Y")
+    result = _run(report_dir, "--exclude-role", "Y", "--dry-run")
+    assert result.exit_code == 0, result.output
+    assert "already styled" in result.output
+
+
+def test_exclude_role_unknown_role_is_a_no_op(report_dir):
+    # A role that never appears in any visual excludes nothing; this
+    # should behave exactly like not passing --exclude-role at all,
+    # not error.
+    result = _run(report_dir, "--exclude-role", "NotARealRole")
+    assert result.exit_code == 0, result.output
+    styled = [
+        d["selector"]["metadata"]
+        for d in _visual(report_dir, "monthlyperformance", "combo01")["visual"][
+            "objects"
+        ]["dataPoint"]
+    ]
+    assert styled == EXPECTED_KEYS
+
+
+# -- --rename-table ---------------------------------------------------------------
+def test_rename_table_overrides_one_slot(project, report_dir):
+    # Rename only the measures table, as a report author might if their
+    # copy of the template uses a different literal name for it (for
+    # example the BI-report-template-site convention, "Set Lines").
+    # x-Plot Specific 1 and 2 are left at their default names.
+    tables_dir = project / "Roastery.SemanticModel" / "definition" / "tables"
+    f = tables_dir / "y-Plot Specific.tmdl"
+    f.write_text(
+        f.read_text(encoding="utf-8").replace("y-Plot Specific", "Set Lines"),
+        encoding="utf-8",
+    )
+
+    result = _run(report_dir, "--rename-table", "y-Plot Specific=Set Lines")
+    assert result.exit_code == 0, result.output
+    assert "Measures: 5 drive the styling" in result.output
+
+
+def test_rename_table_unknown_name_exits_2(report_dir):
+    result = _run(report_dir, "--rename-table", "Not A Real Table=Whatever")
+    assert result.exit_code == 2
+    assert "Not A Real Table" in result.output
+
+
+def test_rename_table_malformed_exits_2(report_dir):
+    result = _run(report_dir, "--rename-table", "no-equals-sign")
+    assert result.exit_code == 2
+    assert "OLD=NEW" in result.output
+
+
+def test_rename_table_via_config_file(project, report_dir, tmp_path):
+    tables_dir = project / "Roastery.SemanticModel" / "definition" / "tables"
+    f = tables_dir / "y-Plot Specific.tmdl"
+    f.write_text(
+        f.read_text(encoding="utf-8").replace("y-Plot Specific", "Set Lines"),
+        encoding="utf-8",
+    )
+
+    config_file = tmp_path / "plotstyler.toml"
+    config_file.write_text(
+        '[tables]\nrenames = { "y-Plot Specific" = "Set Lines" }\n',
+        encoding="utf-8",
+    )
+
+    result = _run(report_dir, "--config", config_file)
+    assert result.exit_code == 0, result.output
+    assert "Measures: 5 drive the styling" in result.output
+
+
 # -- config file -----------------------------------------------------------------
 def test_config_file_overrides(project, report_dir, tmp_path):
     # Rename the field-parameter tables, as a fork of the template might.

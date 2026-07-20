@@ -54,6 +54,13 @@ class StylerConfig:
     field_parameter_tables: tuple[str, ...] = DEFAULT_FIELD_PARAMETER_TABLES
     #: visualType values that get restyled.
     visual_types: tuple[str, ...] = DEFAULT_VISUAL_TYPES
+    #: Query roles (for example "Y", Power BI's internal name for a combo
+    #: chart's column well) whose *currently bound* measure is excluded
+    #: from styling, per visual. Empty by default (no exclusion). This is
+    #: how a measure that is a member of the line's field-parameter table
+    #: but is presently plotted on the columns via a different selector
+    #: avoids getting the line's styling bled onto it.
+    exclude_current_roles: tuple[str, ...] = ()
     #: Hex color for the combo chart's line/column series fill.
     line_color: str = DEFAULT_LINE_COLOR
     #: Optional palette; when non-empty it is cycled per measure and
@@ -112,8 +119,8 @@ class StylerConfig:
 
 
 _KNOWN_SECTIONS = {"tables", "targets", "style"}
-_KNOWN_TABLES_KEYS = {"field_parameters"}
-_KNOWN_TARGETS_KEYS = {"visual_types"}
+_KNOWN_TABLES_KEYS = {"field_parameters", "renames"}
+_KNOWN_TARGETS_KEYS = {"visual_types", "exclude_current_roles"}
 _KNOWN_STYLE_KEYS = {
     "line_color",
     "palette",
@@ -122,6 +129,37 @@ _KNOWN_STYLE_KEYS = {
     "label_transparency",
     "show_labels",
 }
+
+
+def apply_table_renames(
+    tables: tuple[str, ...], renames: dict[str, str]
+) -> tuple[str, ...]:
+    """Substitute table names in place, preserving order and position.
+
+    Unlike ``--table``, which replaces the whole field-parameter table
+    list the moment it's used once, this changes only the named
+    table(s), leaving the rest (defaults or an explicit ``--table``
+    list) untouched. Each key in ``renames`` must match a table already
+    in ``tables`` exactly; an unmatched rename is almost certainly a
+    typo; a table name silently kept unrenamed is worse than an error.
+    """
+    result = list(tables)
+    unmatched = []
+    for old, new in renames.items():
+        try:
+            index = result.index(old)
+        except ValueError:
+            unmatched.append(old)
+            continue
+        result[index] = new
+    if unmatched:
+        raise ConfigError(
+            f"--rename-table (or [tables] renames) names a table that "
+            f"is not in the current field-parameter table list: "
+            f"{', '.join(sorted(unmatched))}. Current tables: "
+            f"{list(tables)}."
+        )
+    return tuple(result)
 
 
 def _reject_unknown_keys(
@@ -166,11 +204,17 @@ def load_config_file(path: Path) -> dict[str, Any]:
     _reject_unknown_keys(path, "tables", tables, _KNOWN_TABLES_KEYS)
     if "field_parameters" in tables:
         overrides["field_parameter_tables"] = tuple(tables["field_parameters"])
+    if "renames" in tables:
+        overrides["table_renames"] = dict(tables["renames"])
 
     targets = raw.get("targets", {})
     _reject_unknown_keys(path, "targets", targets, _KNOWN_TARGETS_KEYS)
     if "visual_types" in targets:
         overrides["visual_types"] = tuple(targets["visual_types"])
+    if "exclude_current_roles" in targets:
+        overrides["exclude_current_roles"] = tuple(
+            targets["exclude_current_roles"]
+        )
 
     style = raw.get("style", {})
     _reject_unknown_keys(path, "style", style, _KNOWN_STYLE_KEYS)
@@ -189,22 +233,41 @@ def load_config_file(path: Path) -> dict[str, Any]:
 
 
 def build_config(
-    config_path: Path | None = None, **cli_overrides: Any
+    config_path: Path | None = None,
+    table_renames: dict[str, str] | None = None,
+    **cli_overrides: Any,
 ) -> StylerConfig:
     """Merge defaults, an optional config file, and CLI overrides.
 
     ``cli_overrides`` entries with value ``None`` are ignored, so unset CLI
-    flags never mask config-file values.
+    flags never mask config-file values. ``table_renames`` (from
+    ``--rename-table``) is applied last, on top of whatever
+    ``field_parameter_tables`` resolved to from the config file, an
+    explicit ``--table`` override, or the built-in default, so renaming
+    one table never requires respecifying the other two.
     """
     values: dict[str, Any] = {}
+    file_renames: dict[str, str] = {}
     if config_path is not None:
         if not config_path.is_file():
             raise ConfigError(
                 f"config file {config_path} does not exist. Check the "
                 f"--config path."
             )
-        values.update(load_config_file(config_path))
+        file_overrides = load_config_file(config_path)
+        file_renames = file_overrides.pop("table_renames", {})
+        values.update(file_overrides)
     values.update({k: v for k, v in cli_overrides.items() if v is not None})
+
+    renames = {**file_renames, **(table_renames or {})}
+    if renames:
+        base_tables = values.get(
+            "field_parameter_tables", DEFAULT_FIELD_PARAMETER_TABLES
+        )
+        values["field_parameter_tables"] = apply_table_renames(
+            base_tables, renames
+        )
+
     config = StylerConfig(**values)
     config.validate()
     return config
