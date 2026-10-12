@@ -47,29 +47,60 @@ def _unquote(single: str | None, double: str | None, bare: str | None) -> str:
 
 
 def strip_dax_comments(text: str) -> str:
-    """Remove ``--`` and ``//`` line comments, respecting string literals.
+    """Remove ``--`` / ``//`` line comments and ``/* */`` block comments.
 
+    String literals (``"..."``) and quoted names (``'...'``) are respected,
+    so ``"a -- b"`` survives. A block comment may span lines; every newline
+    inside it is kept, so line numbers of the surrounding text never move.
     Field-parameter partitions routinely keep retired measures around as
     commented-out tuples; those must never seed formatting entries.
     """
-    out_lines: list[str] = []
-    for line in text.splitlines():
-        in_string: str | None = None
-        cut = len(line)
-        i = 0
-        while i < len(line):
-            ch = line[i]
-            if in_string:
-                if ch == in_string:
-                    in_string = None
-            elif ch in {'"', "'"}:
-                in_string = ch
-            elif line[i : i + 2] in ("--", "//"):
-                cut = i
-                break
+    out: list[str] = []
+    in_string: str | None = None
+    in_block = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        pair = text[i : i + 2]
+        if in_block:
+            if pair == "*/":
+                in_block = False
+                i += 2
+                continue
+            if ch == "\n":
+                out.append(ch)
             i += 1
-        out_lines.append(line[:cut])
-    return "\n".join(out_lines)
+            continue
+        if ch == "\n":
+            # A quote never spans lines in DAX; a stray one must not swallow
+            # the rest of the file.
+            in_string = None
+            out.append(ch)
+            i += 1
+            continue
+        if in_string:
+            if ch == in_string:
+                in_string = None
+            out.append(ch)
+            i += 1
+            continue
+        if ch in {'"', "'"}:
+            in_string = ch
+            out.append(ch)
+            i += 1
+            continue
+        if pair in ("--", "//"):
+            newline = text.find("\n", i)
+            i = n if newline < 0 else newline
+            continue
+        if pair == "/*":
+            in_block = True
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 @dataclass

@@ -63,3 +63,11 @@ def test_strip_dax_comments_respects_strings():
     stripped = strip_dax_comments(text)
     assert '"a -- not a comment"' in stripped
     assert "gone" not in stripped
+
+
+def test_strip_dax_comments_removes_block_comments_and_keeps_newlines():
+    text = 'a /* one\ntwo\nthree */ b\n"/* kept */" -- gone\nc'
+    stripped = strip_dax_comments(text)
+    assert stripped == 'a \n\n b\n"/* kept */" \nc'
+    assert stripped.count("\n") == text.count("\n")
+
