@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "name": "bm01"
+    },
+    {
+      "name": "grp01",
+      "displayName": "Views",
+      "children": [
+        "bm02"
+      ]
+    }
+  ]
+}

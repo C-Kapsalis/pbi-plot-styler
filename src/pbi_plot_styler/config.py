@@ -75,6 +75,10 @@ class StylerConfig:
     label_transparency: int = DEFAULT_LABEL_TRANSPARENCY
     #: Whether data labels are switched on.
     show_labels: bool = True
+    #: Names of the fields above that a config file or CLI flag set
+    #: explicitly. Label settings a visual already carries are kept unless
+    #: the user explicitly configured them (see ``report.restyle_visual``).
+    explicit: frozenset[str] = frozenset()
 
     def validate(self) -> None:
         if not self.field_parameter_tables:
@@ -105,17 +109,17 @@ class StylerConfig:
             )
 
     # -- per-measure color resolution -------------------------------------
-    def line_color_for(self, measure_index: int) -> str:
-        """The series color for the measure at ``measure_index`` (sorted order)."""
+    def series_color(self, measure_key: str, slot: int) -> str:
+        """The series fill for a measure: its palette slot, or line_color."""
         if self.palette:
-            return self.palette[measure_index % len(self.palette)]
+            return self.palette[slot % len(self.palette)]
         return self.line_color
 
-    def label_background_for(self, measure_index: int) -> str:
-        """The label background for a measure: explicit hex, or match the line."""
+    def label_background_for(self, measure_key: str, slot: int) -> str:
+        """The label background: explicit hex, or match the series color."""
         if self.label_background is not None:
             return self.label_background
-        return self.line_color_for(measure_index)
+        return self.series_color(measure_key, slot)
 
 
 _KNOWN_SECTIONS = {"tables", "targets", "style"}
@@ -268,6 +272,7 @@ def build_config(
             base_tables, renames
         )
 
+    values["explicit"] = frozenset(values)
     config = StylerConfig(**values)
     config.validate()
     return config

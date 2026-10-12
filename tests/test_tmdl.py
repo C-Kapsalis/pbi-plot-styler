@@ -71,3 +71,17 @@ def test_strip_dax_comments_removes_block_comments_and_keeps_newlines():
     assert stripped == 'a \n\n b\n"/* kept */" \nc'
     assert stripped.count("\n") == text.count("\n")
 
+
+def test_block_commented_tuples_are_ignored(brewbar):
+    model = SemanticModel.load(brewbar / "Brewbar.SemanticModel")
+    keys = model.field_parameter_measures(("y-Plot Specific",))
+    # Legacy KPI is a real measure, parked inside /* ... */.
+    assert "Sales Measures.Legacy KPI" not in keys
+    assert keys == [
+        "Sales Measures.Avg Ticket",
+        "Sales Measures.Margin %",
+        "Sales Measures.Orders #",
+        "Sales Measures.Revenue",
+        "Sales Measures.Revenue v1.2 (Adj.)",
+    ]
+

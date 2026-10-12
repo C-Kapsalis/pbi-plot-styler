@@ -1,0 +1,26 @@
+{
+  "displayName": "Shops table",
+  "name": "bm02",
+  "options": {
+    "targetVisualNames": [
+      "table20"
+    ],
+    "applyOnlyToTargetVisuals": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.3",
+    "activeSection": "shops",
+    "sections": {
+      "shops": {
+        "visualContainers": {
+          "table20": {
+            "singleVisual": {
+              "visualType": "tableEx"
+            }
+          }
+        }
+      }
+    }
+  }
+}

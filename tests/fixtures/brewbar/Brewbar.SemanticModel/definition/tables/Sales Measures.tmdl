@@ -1,0 +1,40 @@
+table 'Sales Measures'
+	lineageTag: 00000000-0000-0000-0000-0000000bm001
+
+	measure Revenue = SUM ( Orders[Amount] )
+		formatString: #,##0 EUR
+		lineageTag: 00000000-0000-0000-0000-0000000bm002
+
+	measure 'Orders #' = COUNTROWS ( Orders )
+		formatString: #,##0
+		lineageTag: 00000000-0000-0000-0000-0000000bm003
+
+	measure 'Avg Ticket' = DIVIDE ( [Revenue], [Orders #] )
+		formatString: #,##0.00 EUR
+		lineageTag: 00000000-0000-0000-0000-0000000bm004
+
+	measure 'Margin %' = DIVIDE ( [Revenue] - SUM ( Orders[Cost] ), [Revenue] )
+		formatString: 0.0%
+		lineageTag: 00000000-0000-0000-0000-0000000bm005
+
+	measure 'Revenue v1.2 (Adj.)' = [Revenue] * 0.98
+		formatString: #,##0 EUR
+		lineageTag: 00000000-0000-0000-0000-0000000bm006
+
+	measure 'Legacy KPI' = [Revenue] / 2
+		formatString: #,##0
+		lineageTag: 00000000-0000-0000-0000-0000000bm007
+
+	column 'Dummy Key'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-0000000bm008
+		summarizeBy: none
+		sourceColumn: dummy_key
+
+	partition 'Sales Measures' = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows ( {{1}}, {"dummy_key"} )
+				in
+				    Source

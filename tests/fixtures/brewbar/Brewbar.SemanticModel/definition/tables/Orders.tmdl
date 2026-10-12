@@ -1,0 +1,40 @@
+table Orders
+	lineageTag: 00000000-0000-0000-0000-0000000bo001
+
+	column Channel
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000bo002
+		summarizeBy: none
+		sourceColumn: Channel
+
+	column Amount
+		dataType: double
+		lineageTag: 00000000-0000-0000-0000-0000000bo003
+		summarizeBy: sum
+		sourceColumn: Amount
+
+	column Cost
+		dataType: double
+		lineageTag: 00000000-0000-0000-0000-0000000bo004
+		summarizeBy: sum
+		sourceColumn: Cost
+
+	column Shop
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000bo005
+		summarizeBy: none
+		sourceColumn: Shop
+
+	column Month
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000bo006
+		summarizeBy: none
+		sourceColumn: Month
+
+	partition Orders = m
+		mode: import
+		source =
+				let
+				    Source = #table ( {"Channel", "Amount", "Cost", "Shop", "Month"}, {{"Counter", 4.5, 1.2, "Harbour", "Jan"}} )
+				in
+				    Source

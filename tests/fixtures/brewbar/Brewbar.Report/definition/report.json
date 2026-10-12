@@ -1,0 +1,40 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/report/3.3.0/schema.json",
+  "themeCollection": {
+    "baseTheme": {
+      "name": "BrewbarBase",
+      "type": "SharedResources"
+    }
+  },
+  "resourcePackages": [
+    {
+      "name": "SharedResources",
+      "type": "SharedResources",
+      "items": [
+        {
+          "name": "BrewbarBase",
+          "path": "BaseThemes/BrewbarBase.json",
+          "type": "BaseTheme"
+        }
+      ]
+    }
+  ],
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "rf1",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Orders"
+              }
+            },
+            "Property": "Channel"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
+  }
+}

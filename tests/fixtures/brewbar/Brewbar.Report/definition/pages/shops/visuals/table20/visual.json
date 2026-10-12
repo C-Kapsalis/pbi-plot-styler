@@ -1,0 +1,74 @@
+{
+  "name": "table20",
+  "position": {
+    "x": 24,
+    "y": 96,
+    "z": 0,
+    "height": 400,
+    "width": 600,
+    "tabOrder": 1000
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "HierarchyLevel": {
+                  "Expression": {
+                    "Hierarchy": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Shops"
+                        }
+                      },
+                      "Hierarchy": "Geography"
+                    }
+                  },
+                  "Level": "City"
+                }
+              },
+              "queryRef": "Shops.Geography.City",
+              "nativeQueryRef": "City"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Orders"
+                        }
+                      },
+                      "Property": "Amount"
+                    }
+                  },
+                  "Function": 0
+                }
+              },
+              "queryRef": "Sum(Orders.Amount)",
+              "nativeQueryRef": "Sum of Amount"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Sales Measures"
+                    }
+                  },
+                  "Property": "Revenue v1.2 (Adj.)"
+                }
+              },
+              "queryRef": "Sales Measures.Revenue v1.2 (Adj.)",
+              "nativeQueryRef": "Revenue v1.2 (Adj.)"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

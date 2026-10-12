@@ -16,6 +16,7 @@ import click
 from . import __version__
 from .config import DEFAULT_CONFIG_FILENAME, ConfigError, build_config
 from .report import (
+    RestyleInvariantError,
     apply_changes,
     plan_changes,
     resolve_model_dir,
@@ -82,10 +83,10 @@ class StylerError(click.ClickException):
     "--exclude-role",
     "exclude_roles",
     multiple=True,
-    help="Query role (repeatable), for example 'Y', whose currently-bound "
-    "measure is excluded from styling on each visual. Use this when the "
-    "line's field-parameter table shares measures with the columns' "
-    "table, so the columns' current pick never gets the line's styling.",
+    help="Query role (repeatable), for example 'Y', whose measures are "
+    "excluded from styling on each visual: the measure currently bound to "
+    "it, or, when the role is bound through a field parameter, every "
+    "measure that parameter offers. Their existing formatting is kept.",
 )
 @click.option(
     "--line-color",
@@ -213,10 +214,24 @@ def main(
     click.echo(f"Model:    {resolved_model}")
     click.echo(f"Measures: {len(measure_keys)} drive the styling")
 
+    catalogs = {
+        table: [e.key for e in model.parameter_catalog(table)]
+        for table in model.raw_by_table
+    }
     try:
-        changes = plan_changes(report_dir, measure_keys, config)
+        changes = plan_changes(
+            report_dir,
+            measure_keys,
+            config,
+            catalogs={t: k for t, k in catalogs.items() if k},
+        )
     except FileNotFoundError as exc:
         raise StylerError(str(exc)) from exc
+    except RestyleInvariantError as exc:
+        raise StylerError(
+            f"refusing to write {report_dir}: {exc}. This is a bug; please "
+            f"report it with the visual.json involved."
+        ) from exc
 
     pending = [c for c in changes if c.changed]
     if not changes:

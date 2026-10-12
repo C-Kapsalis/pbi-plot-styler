@@ -103,6 +103,18 @@ def strip_dax_comments(text: str) -> str:
     return "".join(out)
 
 
+@dataclass(frozen=True)
+class CatalogEntry:
+    """One measure row of a field-parameter table."""
+
+    #: ``"Table.Measure"`` key, the form ``selector.metadata`` uses.
+    key: str
+    #: The tuple's sort ordinal (third tuple member), when it has one.
+    ordinal: float | None
+    #: Zero-based position of the row in the partition source.
+    position: int
+
+
 @dataclass
 class SemanticModel:
     """A parsed view of a PBIP semantic model's ``definition/tables``."""
@@ -112,6 +124,9 @@ class SemanticModel:
     measures_by_table: dict[str, set[str]] = field(default_factory=dict)
     #: table name -> raw TMDL text (used to scan field-parameter partitions).
     raw_by_table: dict[str, str] = field(default_factory=dict)
+    _catalog_cache: dict[str, list[CatalogEntry]] = field(
+        default_factory=dict, repr=False
+    )
 
     @classmethod
     def load(cls, model_dir: Path) -> "SemanticModel":
@@ -157,20 +172,58 @@ class SemanticModel:
                 return table
         return None
 
+    # -- case-insensitive lookup ----------------------------------------------
+    def table_named(self, name: str) -> str | None:
+        """The model's spelling of table ``name``, matched case-insensitively."""
+        if name in self.raw_by_table:
+            return name
+        lowered = name.lower()
+        for table in self.raw_by_table:
+            if table.lower() == lowered:
+                return table
+        return None
+
     # -- field-parameter scan -------------------------------------------------
+    def parameter_catalog(self, table: str) -> list[CatalogEntry]:
+        """The measure rows of one field-parameter table, in source order.
+
+        A NAMEOF reference counts as a measure when the model actually
+        declares a measure by that name: a table-qualified reference is
+        checked against that table, a bare reference is resolved to its home
+        table. Column references are skipped, and commented-out tuples are
+        ignored. Duplicate registrations are kept; callers decide.
+        Returns ``[]`` for a table that is unknown or references no measure.
+        """
+        real = self.table_named(table)
+        if real is None:
+            return []
+        if real in self._catalog_cache:
+            return self._catalog_cache[real]
+        entries: list[CatalogEntry] = []
+        source = strip_dax_comments(self.raw_by_table[real])
+        for ref in _NAMEOF_REF.finditer(source):
+            ref_table = _unquote(ref.group(1), ref.group(2), None) or None
+            ref_name = ref.group(3).strip()
+            if ref_table:
+                if not self.has_measure(ref_table, ref_name):
+                    continue
+                key = f"{ref_table}.{ref_name}"
+            else:
+                home = self.home_table(ref_name)
+                if home is None:
+                    continue
+                key = f"{home}.{ref_name}"
+            ordinal_match = _ORDINAL_AFTER.match(source, ref.end())
+            ordinal = float(ordinal_match.group(1)) if ordinal_match else None
+            entries.append(CatalogEntry(key, ordinal, len(entries)))
+        self._catalog_cache[real] = entries
+        return entries
+
     def field_parameter_measures(
         self, field_parameter_tables: tuple[str, ...]
     ) -> list[str]:
         """Every measure a field-parameter table exposes, as sorted
-        ``"Table.Measure"`` keys.
-
-        A NAMEOF reference counts as a measure when the model actually
-        declares a measure by that name - table-qualified references are
-        checked against that table, bare references are resolved to their
-        home table. Column references (dimensions) are skipped, and
-        commented-out tuples are ignored.
-        """
-        keys: set[str] = set()
+        ``"Table.Measure"`` keys (see ``parameter_catalog``)."""
         missing = [
             t for t in field_parameter_tables if t not in self.raw_by_table
         ]
@@ -182,18 +235,10 @@ class SemanticModel:
                 f"or configure the right ones with --table or the "
                 f"[tables] field_parameters config key."
             )
+        keys: set[str] = set()
         for table_name in field_parameter_tables:
-            content = self.raw_by_table.get(table_name)
-            if content is None:
-                continue
-            for ref in _NAMEOF_REF.finditer(strip_dax_comments(content)):
-                ref_table = _unquote(ref.group(1), ref.group(2), None) or None
-                ref_name = ref.group(3).strip()
-                if ref_table:
-                    if self.has_measure(ref_table, ref_name):
-                        keys.add(f"{ref_table}.{ref_name}")
-                else:
-                    home = self.home_table(ref_name)
-                    if home is not None:
-                        keys.add(f"{home}.{ref_name}")
+            if table_name in self.raw_by_table:
+                keys.update(e.key for e in self.parameter_catalog(table_name))
         return sorted(keys)
+
+_ORDINAL_AFTER = re.compile(r"\s*,\s*(-?\d+(?:\.\d+)?)")

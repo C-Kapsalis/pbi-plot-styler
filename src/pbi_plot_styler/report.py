@@ -1,22 +1,32 @@
-"""Rebuild combo-chart formatting inside a PBIP report from a measure list.
+"""Restyle combo-chart formatting inside a PBIP report from a measure list.
 
-For every targeted visual the styler wipes and regenerates two arrays under
-``visual.objects`` in ``visual.json``:
+For every targeted visual the styler owns a narrow slice of two arrays under
+``visual.objects`` in ``visual.json``, and nothing else:
 
 ``dataPoint[]``
-    One entry per field-parameter measure, binding the series ``fill``
-    (line and columns alike) to a literal hex color, selected via
-    ``selector.metadata = "<Table>.<Measure>"``.
+    The ``selector.metadata = "<Table>.<Measure>"`` entry of every measure it
+    styles: the series ``fill`` (line and columns alike).
 
 ``labels[]``
-    A leading no-selector entry that turns data labels on/off, sets the
-    label text ``color``, and sets ``enableBackground: true`` (without which
-    Power BI ignores every per-measure background), followed by one entry
-    per measure binding ``backgroundColor`` and ``backgroundTransparency``.
+    The same per-measure entries: ``backgroundColor`` (and
+    ``backgroundTransparency`` when absent or explicitly configured). Plus a
+    no-selector default entry that carries ``enableBackground: true``,
+    without which Power BI ignores every per-measure background. It is
+    seeded only when the visual has none.
 
-Because both arrays are rebuilt from scratch off a sorted measure list, the
-operation is deterministic and idempotent: renamed or removed measures heal
-on the next run, and re-running on an already-styled report is a no-op.
+Everything else in those arrays is preserved verbatim and in order: the
+no-selector defaults (the column render baseline, often hand-tuned),
+``selector.data`` entries (per legend value, for example ``showSeries:
+false``), and the metadata entries of measures excluded from styling (the
+measures drawn as columns). Inside an owned entry, only the owned
+properties change; hand-tuned siblings survive. The rebuilt layout is::
+
+    [defaults] + [excluded metadata] + [styled metadata] + [data-scoped]
+
+Metadata entries for measures that are neither styled nor excluded (renamed
+or retired measures) are dropped, so stale formatting heals. Styled entries
+are sorted by key, so the operation is deterministic and idempotent:
+re-running on an already-styled report is a byte-for-byte no-op.
 """
 from __future__ import annotations
 
@@ -26,11 +36,22 @@ import json
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator, Mapping
 
 from .config import StylerConfig
 
 JSON_INDENT = 2
+
+#: Properties the styler owns inside a no-selector ``labels[]`` entry.
+_LABEL_DEFAULT_OWNED = ("show", "color", "enableBackground")
+
+
+class RestyleInvariantError(RuntimeError):
+    """A rebuilt visual altered an entry the styler must preserve.
+
+    Raised instead of writing anything, so a regression in the merge logic
+    can never silently destroy hand-made formatting.
+    """
 
 
 # -- JSON building blocks ----------------------------------------------------
@@ -43,16 +64,22 @@ def _solid_color(hex_color: str) -> dict:
     return {"solid": {"color": _literal(f"'{hex_color}'")}}
 
 
-def datapoint_entry(measure_key: str, line_hex: str) -> dict:
-    """A ``dataPoint[]`` entry: series fill for one measure."""
-    return {
-        "properties": {"fill": _solid_color(line_hex)},
-        "selector": {"metadata": measure_key},
-    }
+def datapoint_entry(
+    measure_key: str, color: str, existing: dict | None = None
+) -> dict:
+    """A ``dataPoint[]`` entry: series fill for one measure.
+
+    Merges into ``existing`` (the visual's current entry for the same
+    measure), so sibling properties set by hand, such as a
+    ``fillTransparency``, survive.
+    """
+    props = dict((existing or {}).get("properties") or {})
+    props["fill"] = _solid_color(color)
+    return {"properties": props, "selector": {"metadata": measure_key}}
 
 
 def labels_default_entry(config: StylerConfig) -> dict:
-    """The no-selector ``labels[]`` entry that activates everything else."""
+    """The no-selector ``labels[]`` entry seeded when a visual has none."""
     return {
         "properties": {
             "show": _literal("true" if config.show_labels else "false"),
@@ -62,62 +89,251 @@ def labels_default_entry(config: StylerConfig) -> dict:
     }
 
 
-def labels_entry(measure_key: str, background_hex: str, transparency: int) -> dict:
-    """A per-measure ``labels[]`` entry: label background color and opacity."""
-    return {
-        "properties": {
-            "backgroundColor": _solid_color(background_hex),
-            "backgroundTransparency": _literal(f"{transparency}L"),
-        },
-        "selector": {"metadata": measure_key},
+def labels_entry(
+    measure_key: str,
+    background: str,
+    transparency: int,
+    existing: dict | None = None,
+    *,
+    enforce_transparency: bool = True,
+) -> dict:
+    """A per-measure ``labels[]`` entry: label background color and opacity.
+
+    Merges into ``existing``: ``backgroundColor`` is always set, every other
+    property (a custom label ``color``, for example) is kept, and
+    ``backgroundTransparency`` is only seeded when absent unless
+    ``enforce_transparency`` is set.
+    """
+    props = dict((existing or {}).get("properties") or {})
+    props["backgroundColor"] = _solid_color(background)
+    if enforce_transparency or "backgroundTransparency" not in props:
+        props["backgroundTransparency"] = _literal(f"{transparency}L")
+    return {"properties": props, "selector": {"metadata": measure_key}}
+
+
+# -- entry classification ----------------------------------------------------
+def _metadata_of(entry: dict) -> str | None:
+    """The ``selector.metadata`` key of a pure metadata entry, else ``None``."""
+    selector = entry.get("selector")
+    if not isinstance(selector, dict) or set(selector) != {"metadata"}:
+        return None
+    key = selector["metadata"]
+    return key if isinstance(key, str) else None
+
+
+def _is_default(entry: dict) -> bool:
+    return not entry.get("selector")
+
+
+def _split(entries: Iterable[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    """``(defaults, metadata_entries, other)`` in their original order.
+
+    ``other`` holds every entry that is neither a no-selector default nor a
+    pure ``selector.metadata`` entry: ``selector.data`` (per legend value)
+    entries and any selector shape this tool does not know. They are never
+    rewritten.
+    """
+    defaults, metadata, other = [], [], []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            other.append(entry)
+        elif _is_default(entry):
+            defaults.append(entry)
+        elif _metadata_of(entry) is not None:
+            metadata.append(entry)
+        else:
+            other.append(entry)
+    return defaults, metadata, other
+
+
+def _rebuild_card(
+    existing: list | None,
+    styled: list[str],
+    excluded: set[str],
+    build_entry,
+) -> tuple[list, list, list, list]:
+    """Split one ``objects`` array for rebuilding. Returns ``(defaults,
+    excluded_entries, owned_entries, other)``: everything except
+    ``owned_entries`` exactly as found in the input."""
+    defaults, metadata, other = _split(existing or [])
+    excluded_entries = [e for e in metadata if _metadata_of(e) in excluded]
+    previous: dict[str, dict] = {}
+    for entry in metadata:
+        previous.setdefault(_metadata_of(entry), entry)
+    owned = [build_entry(key, previous.get(key)) for key in styled]
+    return defaults, excluded_entries, owned, other
+
+
+def _strip_owned(entry: dict, owned: Iterable[str]) -> dict:
+    props = {
+        k: v
+        for k, v in (entry.get("properties") or {}).items()
+        if k not in owned
     }
+    return {**entry, "properties": props}
 
 
 def restyle_visual(
-    visual_data: dict, measure_keys: list[str], config: StylerConfig
+    visual_data: dict,
+    measure_keys: list[str],
+    config: StylerConfig,
+    *,
+    excluded: Iterable[str] = (),
+    slots: Mapping[str, int] | None = None,
 ) -> dict:
-    """Return a deep copy of ``visual_data`` with rebuilt formatting arrays."""
+    """Return a deep copy of ``visual_data`` with its owned formatting rebuilt.
+
+    ``measure_keys`` are the field-parameter measures; those in ``excluded``
+    (measures this visual draws as columns) are not styled, and their
+    existing metadata entries are preserved verbatim. ``slots`` maps each key
+    to its stable palette slot; when omitted, the sorted index is used.
+    """
+    excluded_set = set(excluded)
+    styled = sorted(k for k in set(measure_keys) if k not in excluded_set)
+    if slots is None:
+        slots = {k: i for i, k in enumerate(sorted(set(measure_keys)))}
+
+    def slot(key: str) -> int:
+        return slots.get(key, 0)
+
     data = copy.deepcopy(visual_data)
     objects = data.setdefault("visual", {}).setdefault("objects", {})
-    objects["dataPoint"] = [
-        datapoint_entry(key, config.line_color_for(i))
-        for i, key in enumerate(measure_keys)
-    ]
-    objects["labels"] = [labels_default_entry(config)] + [
-        labels_entry(key, config.label_background_for(i), config.label_transparency)
-        for i, key in enumerate(measure_keys)
-    ]
+    original = (visual_data.get("visual") or {}).get("objects") or {}
+
+    # dataPoint: never invent a default; a visual without one keeps its
+    # columns exactly as they are.
+    dp_defaults, dp_excluded, dp_owned, dp_other = _rebuild_card(
+        original.get("dataPoint"),
+        styled,
+        excluded_set,
+        lambda key, prev: datapoint_entry(key, config.series_color(key, slot(key)), prev),
+    )
+    objects["dataPoint"] = dp_defaults + dp_excluded + dp_owned + dp_other
+
+    enforce_transparency = "label_transparency" in config.explicit
+    lb_defaults, lb_excluded, lb_owned, lb_other = _rebuild_card(
+        original.get("labels"),
+        styled,
+        excluded_set,
+        lambda key, prev: labels_entry(
+            key,
+            config.label_background_for(key, slot(key)),
+            config.label_transparency,
+            prev,
+            enforce_transparency=enforce_transparency,
+        ),
+    )
+    if lb_defaults:
+        new_defaults = []
+        for entry in lb_defaults:
+            entry = copy.deepcopy(entry)
+            props = entry.setdefault("properties", {})
+            props["enableBackground"] = _literal("true")
+            if "show_labels" in config.explicit:
+                props["show"] = _literal("true" if config.show_labels else "false")
+            if "label_color" in config.explicit:
+                props["color"] = _solid_color(config.label_color)
+            new_defaults.append(entry)
+    else:
+        new_defaults = [labels_default_entry(config)]
+    objects["labels"] = new_defaults + lb_excluded + lb_owned + lb_other
+
+    _assert_preserved(original, objects, excluded_set)
     return data
+
+
+def _assert_preserved(original: dict, rebuilt: dict, excluded: set[str]) -> None:
+    """Every entry the styler does not own must survive verbatim, in order."""
+    for card in ("dataPoint", "labels"):
+        before_defaults, before_meta, before_other = _split(original.get(card) or [])
+        after_defaults, after_meta, after_other = _split(rebuilt.get(card) or [])
+        if after_other != before_other:
+            raise RestyleInvariantError(
+                f"{card}: selector.data (or other non-metadata) entries were "
+                f"altered or dropped ({len(before_other)} -> {len(after_other)})"
+            )
+        if card == "dataPoint":
+            defaults_ok = after_defaults == before_defaults
+        else:
+            defaults_ok = not before_defaults or [
+                _strip_owned(e, _LABEL_DEFAULT_OWNED) for e in after_defaults
+            ] == [_strip_owned(e, _LABEL_DEFAULT_OWNED) for e in before_defaults]
+        if not defaults_ok:
+            raise RestyleInvariantError(
+                f"{card}: a no-selector default entry was altered or dropped"
+            )
+        kept = [e for e in after_meta if _metadata_of(e) in excluded]
+        if kept != [e for e in before_meta if _metadata_of(e) in excluded]:
+            raise RestyleInvariantError(
+                f"{card}: metadata entries of excluded measures were altered "
+                f"or dropped"
+            )
+
+
+# -- query-state reading -----------------------------------------------------
+def _query_state(visual_data: dict) -> dict:
+    return (
+        ((visual_data.get("visual") or {}).get("query") or {}).get("queryState")
+        or {}
+    )
+
+
+def _source_entity(node: dict) -> str | None:
+    return ((node.get("Expression") or {}).get("SourceRef") or {}).get("Entity")
 
 
 def current_role_measure_key(visual_data: dict, role: str) -> str | None:
     """The ``"<Entity>.<Property>"`` key presently bound to a query role.
 
     Power BI's combo-chart roles are named ``Y`` (columns) and ``Y2``
-    (line) internally. A role bound through a field parameter still
-    resolves to one concrete measure at any given time; this reads that
-    current binding straight out of ``visual.query.queryState``, not the
-    field parameter's full catalog of options.
-
-    Returns ``None`` if the visual has no query state, the role isn't
-    present, or the role's projection isn't a measure (a dimension on
-    ``Category``/``Series``, for example).
+    (line) internally. Returns the first measure projection of the role, or
+    ``None`` if the visual has no query state, the role isn't present, or
+    it projects no measure.
     """
-    query_state = (
-        ((visual_data.get("visual") or {}).get("query") or {}).get("queryState")
-        or {}
-    )
-    for projection in (query_state.get(role) or {}).get("projections", []):
+    for projection in (_query_state(visual_data).get(role) or {}).get(
+        "projections", []
+    ):
         measure = (projection.get("field") or {}).get("Measure")
         if not measure:
             continue
-        entity = ((measure.get("Expression") or {}).get("SourceRef") or {}).get(
-            "Entity"
-        )
+        entity = _source_entity(measure)
         prop = measure.get("Property")
         if entity and prop:
             return f"{entity}.{prop}"
     return None
+
+
+def role_measure_keys(
+    visual_data: dict,
+    role: str,
+    catalogs: Mapping[str, list[str]] | None = None,
+) -> set[str]:
+    """Every measure a query role can draw on this visual.
+
+    A direct ``Measure`` projection contributes its own key. A ``Column``
+    projection on a field-parameter table (a role bound through a field
+    parameter) contributes that table's whole measure catalog, looked up in
+    ``catalogs`` (table name -> keys, matched case-insensitively), because
+    any of those measures may be the one currently picked.
+    """
+    lowered = {t.lower(): keys for t, keys in (catalogs or {}).items()}
+    keys: set[str] = set()
+    for projection in (_query_state(visual_data).get(role) or {}).get(
+        "projections", []
+    ):
+        fld = projection.get("field") or {}
+        measure = fld.get("Measure")
+        if measure:
+            entity, prop = _source_entity(measure), measure.get("Property")
+            if entity and prop:
+                keys.add(f"{entity}.{prop}")
+            continue
+        column = fld.get("Column")
+        if column:
+            entity = _source_entity(column)
+            if entity and entity.lower() in lowered:
+                keys.update(lowered[entity.lower()])
+    return keys
 
 
 # -- report traversal ---------------------------------------------------------
@@ -178,21 +394,35 @@ class VisualChange:
         )
 
 
-def dump_visual(data: dict, *, trailing_newline: bool = True) -> str:
+def dump_visual(
+    data: dict, *, trailing_newline: bool = True, newline: str = "\n"
+) -> str:
     """Serialize a visual back the way PBIP tooling writes it.
 
-    Power BI Desktop saves ``visual.json`` without a trailing newline;
-    hand-maintained files often carry one. The caller passes whichever
-    convention the source file used so untouched bytes stay untouched.
+    Power BI Desktop saves ``visual.json`` without a trailing newline and
+    with LF line endings; hand-maintained files may differ. The caller
+    passes whichever conventions the source file used so untouched bytes
+    stay untouched.
     """
     text = json.dumps(data, indent=JSON_INDENT, ensure_ascii=False)
-    return text + "\n" if trailing_newline else text
+    if trailing_newline:
+        text += "\n"
+    return text.replace("\n", newline) if newline != "\n" else text
 
 
 def plan_changes(
-    report_dir: Path, measure_keys: list[str], config: StylerConfig
+    report_dir: Path,
+    measure_keys: list[str],
+    config: StylerConfig,
+    *,
+    catalogs: Mapping[str, list[str]] | None = None,
 ) -> list[VisualChange]:
-    """Compute the rewrite for every targeted visual (changed or not)."""
+    """Compute the rewrite for every targeted visual (changed or not).
+
+    ``catalogs`` (field-parameter table -> measure keys) lets an excluded
+    role bound through a field parameter exclude that parameter's whole
+    catalog.
+    """
     changes: list[VisualChange] = []
     for visual_file in iter_visual_files(report_dir):
         # Read raw bytes so change detection is byte-accurate (no newline
@@ -204,25 +434,22 @@ def plan_changes(
             continue
         if (data.get("visual") or {}).get("visualType") not in config.visual_types:
             continue
-        excluded = {
-            current_role_measure_key(data, role)
-            for role in config.exclude_current_roles
-        }
-        excluded.discard(None)
-        visual_measure_keys = (
-            [k for k in measure_keys if k not in excluded]
-            if excluded
-            else measure_keys
+        excluded: set[str] = set()
+        for role in config.exclude_current_roles:
+            excluded |= role_measure_keys(data, role, catalogs)
+        new_data = restyle_visual(
+            data, measure_keys, config, excluded=excluded
         )
-        new_data = restyle_visual(data, visual_measure_keys, config)
-        changes.append(
-            VisualChange(
-                path=visual_file,
-                old_text=old_text,
-                new_text=dump_visual(
-                    new_data, trailing_newline=old_text.endswith("\n")
-                ),
+        if new_data == data:
+            new_text = old_text  # already in style: leave every byte alone
+        else:
+            new_text = dump_visual(
+                new_data,
+                trailing_newline=old_text.endswith("\n"),
+                newline="\r\n" if "\r\n" in old_text else "\n",
             )
+        changes.append(
+            VisualChange(path=visual_file, old_text=old_text, new_text=new_text)
         )
     return changes
 
@@ -234,7 +461,7 @@ def apply_changes(changes: list[VisualChange]) -> int:
         if change.changed:
             # write_bytes, not write_text: text mode would rewrite every
             # line ending to os.linesep (CRLF on Windows), churning bytes
-            # far outside the two rebuilt arrays.
+            # far outside the owned entries.
             change.path.write_bytes(change.new_text.encode("utf-8"))
             written += 1
     return written
@@ -254,6 +481,6 @@ def write_zip(
         for file in sorted(p for p in report_dir.rglob("*") if p.is_file()):
             arcname = (Path(report_dir.name) / file.relative_to(report_dir)).as_posix()
             if file in styled:
-                archive.writestr(arcname, styled[file])
+                archive.writestr(arcname, styled[file].encode("utf-8"))
             else:
                 archive.write(file, arcname)

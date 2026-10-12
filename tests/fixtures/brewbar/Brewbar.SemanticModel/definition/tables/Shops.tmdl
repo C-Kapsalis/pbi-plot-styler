@@ -1,0 +1,33 @@
+table Shops
+	lineageTag: 00000000-0000-0000-0000-0000000bs001
+
+	column Shop
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000bs002
+		summarizeBy: none
+		sourceColumn: Shop
+
+	column City
+		dataType: string
+		lineageTag: 00000000-0000-0000-0000-0000000bs003
+		summarizeBy: none
+		sourceColumn: City
+
+	hierarchy Geography
+		lineageTag: 00000000-0000-0000-0000-0000000bs004
+
+		level City
+			lineageTag: 00000000-0000-0000-0000-0000000bs005
+			column: City
+
+		level Shop
+			lineageTag: 00000000-0000-0000-0000-0000000bs006
+			column: Shop
+
+	partition Shops = m
+		mode: import
+		source =
+				let
+				    Source = #table ( {"Shop", "City"}, {{"Harbour", "Porto"}, {"Old Town", "Lisbon"}} )
+				in
+				    Source

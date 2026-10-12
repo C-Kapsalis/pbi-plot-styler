@@ -1,0 +1,45 @@
+table 'y-Plot Specific'
+	lineageTag: 00000000-0000-0000-0000-00000000a301
+
+	column 'y-Plot Specific'
+		lineageTag: 00000000-0000-0000-0000-00000000a302
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'y-Plot Specific Order'
+
+		relatedColumnDetails
+			groupByColumn: 'y-Plot Specific Fields'
+
+	column 'y-Plot Specific Fields'
+		isHidden
+		lineageTag: 00000000-0000-0000-0000-00000000a303
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+	column 'y-Plot Specific Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-0000-0000-00000000a304
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	partition 'y-Plot Specific' = calculated
+		mode: import
+		source =
+				{
+				    ( "Revenue", NAMEOF ( 'Sales Measures'[Revenue] ), 10, "sales_y" ),
+				    ( "Orders #", NAMEOF ( [Orders #] ), 20, "sales_y" ),
+				    ( "Avg Ticket", NAMEOF ( [Avg Ticket] ), 30, "sales_y" ),
+				    ( "Margin %", NAMEOF ( 'Sales Measures'[Margin %] ), 40, "profit_y" ),
+				    ( "Revenue v1.2 (Adj.)", NAMEOF ( [Revenue v1.2 (Adj.)] ), 50, "sales_y" ),
+				    /* retired, kept for reference:
+				    ( "Legacy KPI", NAMEOF ( [Legacy KPI] ), 60, "sales_y" ),
+				    */
+				    ( "Revenue (again)", NAMEOF ( [Revenue] ), 70, "profit_y" )
+				}

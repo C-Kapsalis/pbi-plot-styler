@@ -34,3 +34,20 @@ def report_dir(project: Path) -> Path:
 @pytest.fixture
 def model_dir(project: Path) -> Path:
     return project / "Roastery.SemanticModel"
+
+
+BREWBAR_DIR = Path(__file__).parent / "fixtures" / "brewbar"
+
+
+@pytest.fixture
+def brewbar(tmp_path: Path) -> Path:
+    """A writable copy of the brewbar project (hand-tuned formatting,
+    bookmarks, a columns role bound through a field parameter)."""
+    dest = tmp_path / "brewbar"
+    shutil.copytree(BREWBAR_DIR, dest)
+    return dest
+
+
+@pytest.fixture
+def brewbar_report(brewbar: Path) -> Path:
+    return brewbar / "Brewbar.Report"
