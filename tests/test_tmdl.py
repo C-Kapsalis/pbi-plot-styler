@@ -98,3 +98,20 @@ def test_palette_slots_follow_ordinals_and_first_registration_wins(brewbar):
         "Sales Measures.Revenue v1.2 (Adj.)": 4,
     }
 
+
+def test_ref_strings_split_at_known_table_prefix(brewbar):
+    model = SemanticModel.load(brewbar / "Brewbar.SemanticModel")
+    assert model.resolves_ref_string("Sales Measures.Revenue v1.2 (Adj.)")
+    assert model.resolves_ref_string("sales measures.revenue")  # case-insensitive
+    assert model.resolves_ref_string("Sum(Orders.Amount)")
+    assert model.resolves_ref_string("Shops.Geography.City")
+    assert not model.resolves_ref_string("Sales Measures.Revenue v1.3")
+    assert not model.resolves_ref_string("Nope.Revenue")
+
+
+def test_columns_and_hierarchies_inventory(brewbar):
+    model = SemanticModel.load(brewbar / "Brewbar.SemanticModel")
+    assert model.columns_by_table["Shops"] == {"Shop", "City"}
+    assert model.hierarchies_by_table["Shops"] == {"Geography": ["City", "Shop"]}
+    assert model.field_kind("orders", "channel") == "column"
+    assert model.field_kind("Sales Measures", "Margin %") == "measure"

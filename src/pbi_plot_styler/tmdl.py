@@ -122,6 +122,12 @@ class SemanticModel:
     definition_dir: Path
     #: table name -> set of measure names declared in it.
     measures_by_table: dict[str, set[str]] = field(default_factory=dict)
+    #: table name -> set of column names declared in it.
+    columns_by_table: dict[str, set[str]] = field(default_factory=dict)
+    #: table name -> {hierarchy name: [level names]}.
+    hierarchies_by_table: dict[str, dict[str, list[str]]] = field(
+        default_factory=dict
+    )
     #: table name -> raw TMDL text (used to scan field-parameter partitions).
     raw_by_table: dict[str, str] = field(default_factory=dict)
     _catalog_cache: dict[str, list[CatalogEntry]] = field(
@@ -159,6 +165,9 @@ class SemanticModel:
             bucket = model.measures_by_table.setdefault(table_name, set())
             for m in _MEASURE_DECL.finditer(content):
                 bucket.add(_unquote(m.group(1), m.group(2), m.group(3)))
+            columns, hierarchies = _parse_columns_and_hierarchies(content)
+            model.columns_by_table[table_name] = columns
+            model.hierarchies_by_table[table_name] = hierarchies
         return model
 
     # -- measure lookups ----------------------------------------------------
@@ -172,7 +181,7 @@ class SemanticModel:
                 return table
         return None
 
-    # -- case-insensitive lookup ----------------------------------------------
+    # -- case-insensitive resolution (used by `check`) -----------------------
     def table_named(self, name: str) -> str | None:
         """The model's spelling of table ``name``, matched case-insensitively."""
         if name in self.raw_by_table:
@@ -182,6 +191,66 @@ class SemanticModel:
             if table.lower() == lowered:
                 return table
         return None
+
+    def field_kind(self, table: str, name: str) -> str | None:
+        """``"measure"``, ``"column"`` or ``"hierarchy"`` for a field of
+        ``table`` (both matched case-insensitively), or ``None``."""
+        real = self.table_named(table)
+        if real is None:
+            return None
+        lowered = name.lower()
+        if any(m.lower() == lowered for m in self.measures_by_table.get(real, ())):
+            return "measure"
+        if any(c.lower() == lowered for c in self.columns_by_table.get(real, ())):
+            return "column"
+        if any(h.lower() == lowered for h in self.hierarchies_by_table.get(real, {})):
+            return "hierarchy"
+        return None
+
+    def hierarchy_levels(self, table: str, hierarchy: str) -> list[str] | None:
+        real = self.table_named(table)
+        if real is None:
+            return None
+        for name, levels in self.hierarchies_by_table.get(real, {}).items():
+            if name.lower() == hierarchy.lower():
+                return levels
+        return None
+
+    def resolves_ref_string(self, ref: str) -> bool:
+        """Whether a ``"Table.Field"`` string (a ``queryRef`` or a
+        ``selector.metadata``) names something in the model.
+
+        The string is split at a *known table prefix*, longest first, never
+        with a naive ``rsplit(".")``: measure names may contain dots
+        (``Sales.Revenue v1.2 (Adj.)``). An aggregation wrapper such as
+        ``Sum(Orders.Amount)`` is unwrapped first. After the table, the rest
+        may be a measure, a column, a hierarchy, ``Hierarchy.Level``, or a
+        date-variation path that starts with a column name.
+        """
+        wrapped = _AGG_WRAPPER.match(ref)
+        if wrapped:
+            ref = wrapped.group(1)
+        lowered = ref.lower()
+        candidates = sorted(
+            (t for t in self.raw_by_table if lowered.startswith(t.lower() + ".")),
+            key=len,
+            reverse=True,
+        )
+        for table in candidates:
+            rest = ref[len(table) + 1 :]
+            if self.field_kind(table, rest):
+                return True
+            rest_lower = rest.lower()
+            for hierarchy, levels in self.hierarchies_by_table.get(table, {}).items():
+                prefix = hierarchy.lower() + "."
+                if rest_lower.startswith(prefix) and any(
+                    lvl.lower() == rest_lower[len(prefix) :] for lvl in levels
+                ):
+                    return True
+            for column in self.columns_by_table.get(table, ()):
+                if rest_lower.startswith(column.lower() + "."):
+                    return True
+        return False
 
     # -- field-parameter scan -------------------------------------------------
     def parameter_catalog(self, table: str) -> list[CatalogEntry]:
@@ -268,4 +337,46 @@ class SemanticModel:
         return slots
 
 
+# -- column / hierarchy inventory ---------------------------------------------
+_OBJECT_DECL = re.compile(
+    r"^(?P<indent>[ \t]+)(?P<kind>column|hierarchy|level|measure|partition|"
+    r"calculationGroup|calculationItem|annotation|extendedProperty)\s+"
+    r"(?:'(?P<single>(?:[^'\n]|'')+)'|\"(?P<double>[^\"\n]+)\"|(?P<bare>[^\s=]+))"
+)
+
+
+def _indent_width(indent: str) -> int:
+    return len(indent.expandtabs(4))
+
+
+def _parse_columns_and_hierarchies(
+    content: str,
+) -> tuple[set[str], dict[str, list[str]]]:
+    """Columns and hierarchies (with their levels) declared in a table file."""
+    columns: set[str] = set()
+    hierarchies: dict[str, list[str]] = {}
+    current: str | None = None
+    current_indent = 0
+    for line in content.splitlines():
+        m = _OBJECT_DECL.match(line)
+        if not m:
+            continue
+        kind = m.group("kind")
+        name = _unquote(m.group("single"), m.group("double"), m.group("bare"))
+        indent = _indent_width(m.group("indent"))
+        if kind == "level" and current is not None and indent > current_indent:
+            hierarchies[current].append(name)
+            continue
+        if kind in ("annotation", "extendedProperty") and current is not None:
+            continue
+        current = None
+        if kind == "column":
+            columns.add(name)
+        elif kind == "hierarchy":
+            current, current_indent = name, indent
+            hierarchies[name] = []
+    return columns, hierarchies
+
+
+_AGG_WRAPPER = re.compile(r"^[A-Za-z]+\((.*)\)$", re.DOTALL)
 _ORDINAL_AFTER = re.compile(r"\s*,\s*(-?\d+(?:\.\d+)?)")

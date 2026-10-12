@@ -511,3 +511,9 @@ def test_zero_targeted_visuals_exits_2(report_dir):
     result = _run(report_dir, "--visual-type", "pieChart", "--dry-run")
     assert result.exit_code == 2
     assert "no targeted visuals" in result.output
+
+
+def test_explicit_style_subcommand_matches_default(report_dir):
+    result = _run("style", report_dir, "--dry-run")
+    assert result.exit_code == 1
+    assert "2/2 visual(s) would change." in result.output
