@@ -44,20 +44,23 @@ where `tomllib` is not yet in the standard library).
 
 ```
 src/pbi_plot_styler/
-  __init__.py     — package metadata (__version__)
-  cli.py          — Click command; argument/option parsing, output, exit codes
-  config.py       — StylerConfig dataclass, TOML loading, flag/file/default merge
-  report.py       — report traversal + the visual.json rewrite (dataPoint[] / labels[])
-  tmdl.py         — minimal TMDL parsing: measure inventory + NAMEOF resolution
+  __init__.py     : package metadata (__version__)
+  cli.py          : Click command; argument/option parsing, output, exit codes
+  config.py       : StylerConfig dataclass, TOML loading, flag/file/default merge
+  report.py       : report traversal + the visual.json rewrite (dataPoint[] / labels[])
+  tmdl.py         : minimal TMDL parsing: measure inventory + NAMEOF resolution
 tests/
-  conftest.py     — fixtures (a disposable copy of the roastery project), EXPECTED_KEYS
-  test_cli.py     — end-to-end CLI: apply, dry-run, config, overrides, zip, byte fidelity
-  test_restyle.py — formatting rebuild: entry shapes, palettes, determinism, idempotency
-  test_tmdl.py    — TMDL parsing: measure inventory, field-parameter reference resolution
-  fixtures/roastery/ — a small PBIP project used by the tests
-examples/coffee-roastery/ — a complete, openable PBIP demo (see its README)
-docs/             — tutorials / reference / explanation
+  conftest.py     : fixtures (a disposable copy of the roastery project), EXPECTED_KEYS
+  test_cli.py     : end-to-end CLI: apply, dry-run, config, overrides, zip, byte fidelity
+  test_restyle.py : formatting rebuild: entry shapes, palettes, determinism, idempotency
+  test_tmdl.py    : TMDL parsing: measure inventory, field-parameter reference resolution
+  fixtures/roastery/ : a small PBIP project used by the tests
+examples/coffee-roastery/ : a complete, openable PBIP demo (see its README)
 ```
+
+The full documentation (tutorials, reference, explanation) lives in the
+separate `pbi-plot-styler-documentation` repository, published on Read the
+Docs; see [README.md](README.md#documentation).
 
 ## How the styling pipeline works
 
@@ -76,24 +79,24 @@ A run flows in one direction: **TMDL → measure keys → restyled visuals**.
    are stripped first (`strip_dax_comments`), so retired measures parked as
    commented-out tuples are ignored. A reference counts only when the model
    actually declares a measure by that name (column/dimension references are
-   skipped). The result is a **sorted** list of `"Table.Measure"` keys — the
+   skipped). The result is a **sorted** list of `"Table.Measure"` keys: the
    sort makes output deterministic.
 4. **Plan the rewrite** (`report.plan_changes`). Every `visual.json` under
    `definition/pages/**` is read as raw bytes; visuals whose `visualType` is
    not in the configured targets are skipped. For each target,
    `report.restyle_visual` returns a deep copy with two arrays under
    `visual.objects` rebuilt from scratch off the sorted measure list:
-   - **`dataPoint[]`** — one entry per measure, binding the series `fill`
+   - **`dataPoint[]`**: one entry per measure, binding the series `fill`
      (line and columns) to a hex color, selected via
      `selector.metadata = "<Table>.<Measure>"`.
-   - **`labels[]`** — a leading no-selector entry (`show`, text `color`,
+   - **`labels[]`**: a leading no-selector entry (`show`, text `color`,
      `enableBackground: true`), then one background entry per measure.
 
    Because both arrays are regenerated wholesale, the operation is
    deterministic, idempotent, and self-healing (stale entries for
    renamed/retired measures disappear).
 5. **Apply or diff** (`cli.main`). Default mode writes changed visuals in
-   place with `write_bytes` (never text mode — that would rewrite LF to CRLF
+   place with `write_bytes` (never text mode: that would rewrite LF to CRLF
    on Windows and churn bytes outside the two arrays; the source trailing-
    newline convention is preserved too). `--dry-run` prints a unified diff and
    writes nothing. `--zip OUT.zip` also emits the styled report as an archive.
@@ -106,15 +109,15 @@ Configuration has a single merge path (`config.build_config`), with precedence
 **CLI flags > config file > built-in defaults**. To add a new knob, touch these
 in order:
 
-1. **`config.py`** — add a field to the `StylerConfig` dataclass with a default
+1. **`config.py`**: add a field to the `StylerConfig` dataclass with a default
    (add a `DEFAULT_*` constant for it), validate it in `StylerConfig.validate`
    (reuse `_require_hex` for colors), and map its TOML key in
    `load_config_file` (under the right `[tables]` / `[targets]` / `[style]`
    section).
-2. **`cli.py`** — add the matching `@click.option`, then pass it into the
+2. **`cli.py`**: add the matching `@click.option`, then pass it into the
    `build_config(...)` call. Options default to `None` so that an unset flag
    never masks a config-file value.
-3. **`report.py`** — consume the new field in `restyle_visual` (or its
+3. **`report.py`**: consume the new field in `restyle_visual` (or its
    `datapoint_entry` / `labels_*` helpers) to actually change the output.
 
 To add a **new styling rule** (e.g. rebuild another `visual.objects` array),
@@ -138,7 +141,7 @@ pbi-plot-styler examples/coffee-roastery/Roastery.Report --dry-run
 
 `pytest` must be green. The `--dry-run` on the example is a quick smoke test:
 because the example ships deliberately unstyled it should print a diff and exit
-`1` on a clean checkout — run it before and after your change to confirm the
+`1` on a clean checkout: run it before and after your change to confirm the
 tool still produces sensible output. Keep the change focused; do not modify the
 `examples/` project or its committed report as part of an unrelated change.
 
@@ -151,15 +154,15 @@ tool still produces sensible output. Keep the change focused; do not modify the
   commits.
 - Open a PR against the default branch with a clear description of the problem
   and the approach, the commands you ran to verify (`pytest`, a `--dry-run`),
-  and a note on any user-facing change to the CLI/config surface. Update the
-  relevant docs (`README.md`, `docs/`, `RELEASE-NOTES.md`) when behavior
-  changes.
+  and a note on any user-facing change to the CLI/config surface. Update
+  `README.md`, `RELEASE-NOTES.md`, and the relevant page in
+  `pbi-plot-styler-documentation` when behavior changes.
 
 ## Reporting issues
 
 File issues with: the exact command you ran, the observed output (including the
-exit code), what you expected, your OS and Python version, and — if the problem
-is parsing- or rewrite-related — a minimal snippet of the field-parameter TMDL
+exit code), what you expected, your OS and Python version, and, if the problem
+is parsing- or rewrite-related, a minimal snippet of the field-parameter TMDL
 or the `visual.json` involved. If you can reproduce against
 `examples/coffee-roastery`, say so; a shared reproduction is the fastest path
 to a fix.
