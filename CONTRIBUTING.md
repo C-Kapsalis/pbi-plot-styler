@@ -45,16 +45,21 @@ where `tomllib` is not yet in the standard library).
 ```
 src/pbi_plot_styler/
   __init__.py     : package metadata (__version__)
-  cli.py          : Click command; argument/option parsing, output, exit codes
-  config.py       : StylerConfig dataclass, TOML loading, flag/file/default merge
-  report.py       : report traversal + the visual.json rewrite (dataPoint[] / labels[])
-  tmdl.py         : minimal TMDL parsing: measure inventory + NAMEOF resolution
+  check.py        : the `check` command's integrity checks, surgical fixes, baselines
+  cli.py          : Click group (`style`, the default, and `check`); options, output, exit codes
+  config.py       : StylerConfig dataclass, TOML loading, flag/file/default merge, colors
+  report.py       : report discovery + the owned-entries visual.json rewrite
+  tmdl.py         : minimal TMDL parsing: tables, measures, columns, hierarchies,
+                    field-parameter catalogs, palette slots, reference resolution
 tests/
-  conftest.py     : fixtures (a disposable copy of the roastery project), EXPECTED_KEYS
+  conftest.py     : fixtures (disposable copies of the test projects), EXPECTED_KEYS
+  test_check.py   : `check`: one injected defect per check id, --fix, baselines
   test_cli.py     : end-to-end CLI: apply, dry-run, config, overrides, zip, byte fidelity
+  test_preserve.py : owned-entries merge, asserted against the brewbar ground truth
   test_restyle.py : formatting rebuild: entry shapes, palettes, determinism, idempotency
-  test_tmdl.py    : TMDL parsing: measure inventory, field-parameter reference resolution
+  test_tmdl.py    : TMDL parsing: inventory, field-parameter catalogs, slots, comments
   fixtures/roastery/ : a small PBIP project used by the tests
+  fixtures/brewbar/  : hand-tuned formatting, bookmarks, a field-parameter-bound columns role
 examples/coffee-roastery/ : a complete, openable PBIP demo (see its README)
 ```
 
@@ -66,12 +71,15 @@ Docs; see [README.md](README.md#documentation).
 
 A run flows in one direction: **TMDL → measure keys → restyled visuals**.
 
-1. **Resolve the model** (`report.resolve_model_dir`). The report's
-   `definition.pbir` is read and its `datasetReference.byPath.path` points at
-   the paired `*.SemanticModel` folder. `--model` overrides this.
+1. **Find the reports and their models** (`report.discover_reports`,
+   `report.resolve_model_dir`). The path is a `*.Report` folder or any folder
+   holding `*.Report` folders at any depth. Each report's `definition.pbir`
+   is read and its `datasetReference.byPath.path` points at the paired
+   `*.SemanticModel` folder; each model is loaded once. `--model` overrides
+   this.
 2. **Parse the TMDL** (`tmdl.SemanticModel.load`). Every
    `definition/tables/*.tmdl` is scanned for its `table` declaration and its
-   `measure` declarations, building a `table -> {measure names}` inventory.
+   `measure`, `column` and `hierarchy` declarations.
    Only TMDL models are supported; TMSL/`model.bim` is not.
 3. **Resolve measure keys** (`tmdl.SemanticModel.field_parameter_measures`).
    The configured field-parameter tables' partitions are scanned for
@@ -80,28 +88,39 @@ A run flows in one direction: **TMDL → measure keys → restyled visuals**.
    commented-out tuples are ignored. A reference counts only when the model
    actually declares a measure by that name (column/dimension references are
    skipped). The result is a **sorted** list of `"Table.Measure"` keys: the
-   sort makes output deterministic.
+   sort makes output deterministic. Separately, `palette_slots` gives each
+   measure a stable color slot from the field parameter's sort ordinals.
 4. **Plan the rewrite** (`report.plan_changes`). Every `visual.json` under
    `definition/pages/**` is read as raw bytes; visuals whose `visualType` is
-   not in the configured targets are skipped. For each target,
-   `report.restyle_visual` returns a deep copy with two arrays under
-   `visual.objects` rebuilt from scratch off the sorted measure list:
-   - **`dataPoint[]`**: one entry per measure, binding the series `fill`
-     (line and columns) to a hex color, selected via
-     `selector.metadata = "<Table>.<Measure>"`.
-   - **`labels[]`**: a leading no-selector entry (`show`, text `color`,
-     `enableBackground: true`), then one background entry per measure.
-
-   Because both arrays are regenerated wholesale, the operation is
-   deterministic, idempotent, and self-healing (stale entries for
-   renamed/retired measures disappear).
-5. **Apply or diff** (`cli.main`). Default mode writes changed visuals in
+   not in the configured targets are skipped. The measures of the
+   `exclude_current_roles` roles are computed per visual
+   (`report.role_measure_keys`). `report.restyle_visual` then returns a deep
+   copy in which only the **owned** entries change: the
+   `selector.metadata = "<Table>.<Measure>"` entries of styled measures, and
+   inside them only `fill` (`dataPoint[]`) and `backgroundColor` /
+   `backgroundTransparency` (`labels[]`), merged over the existing entry so
+   sibling properties survive. No-selector defaults, `selector.data`
+   entries, and the entries of excluded measures are kept verbatim and in
+   order; `_assert_preserved` raises `RestyleInvariantError` if any of them
+   changed. Entries of retired measures are dropped, so the operation is
+   deterministic, idempotent, and self-healing.
+5. **Apply or diff** (`cli.style`). Default mode writes changed visuals in
    place with `write_bytes` (never text mode: that would rewrite LF to CRLF
-   on Windows and churn bytes outside the two arrays; the source trailing-
-   newline convention is preserved too). `--dry-run` prints a unified diff and
+   on Windows and churn bytes outside the owned entries; the source line
+   endings and trailing-newline convention are preserved too, and a visual
+   already in style is not rewritten at all). `--dry-run` prints a unified diff and
    writes nothing. `--zip OUT.zip` also emits the styled report as an archive.
 
 Exit codes are CI-grade: `0` clean, `1` drift (dry-run only), `2` error.
+
+The `check` command (`check.check_report`) is independent of styling: it
+walks `report.json`, `page.json`, `visual.json` and bookmark files and emits
+`Finding`s with stable ids (the table is in `check.py`'s docstring). To add a
+check, give it a new id in `CHECKS` (never reuse or renumber one: baselines
+key on it), use a location subject that does not depend on array indices,
+and add a test that injects exactly that defect into a copy of the brewbar
+fixture. A fix must be a surgical text edit verified by parsing both sides,
+like `fix_bookmark_text`.
 
 ## Adding a config knob or a styling rule
 
@@ -120,16 +139,20 @@ in order:
 3. **`report.py`**: consume the new field in `restyle_visual` (or its
    `datapoint_entry` / `labels_*` helpers) to actually change the output.
 
-To add a **new styling rule** (e.g. rebuild another `visual.objects` array),
+To add a **new styling rule** (e.g. style another `visual.objects` array),
 add a builder helper alongside `datapoint_entry` / `labels_entry` and wire it
-into `restyle_visual`. Keep rules **deterministic and idempotent**: build the
-array from scratch off the sorted `measure_keys` rather than mutating what is
-already there, so re-runs stay a no-op and stale entries heal.
+into `restyle_visual`. Keep rules **deterministic and idempotent**, and follow
+the owned-entries rule: change only the properties you own, merge into the
+existing entry instead of replacing it, emit owned entries in sorted
+`measure_keys` order, and extend `_assert_preserved` to cover everything you
+keep. Test preservation against fixture ground truth (literal expected
+entries), never only against the tool agreeing with itself.
 
 Add or update tests for any change: `test_tmdl.py` for parsing/resolution,
-`test_restyle.py` for the rewrite shape and determinism, `test_cli.py` for the
-flag/config surface and byte fidelity. The tests work off a disposable copy of
-`tests/fixtures/roastery` (see `conftest.py`); `EXPECTED_KEYS` there is the
+`test_restyle.py` / `test_preserve.py` for the rewrite shape, preservation and
+determinism, `test_check.py` for checks, `test_cli.py` for the flag/config
+surface and byte fidelity. The tests work off disposable copies of
+`tests/fixtures/roastery` and `tests/fixtures/brewbar` (see `conftest.py`); `EXPECTED_KEYS` there is the
 canonical sorted measure-key list.
 
 ## Check before you open a PR

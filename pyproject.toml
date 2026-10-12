@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pbi-plot-styler"
-version = "0.1.0"
-description = "Make every Power BI combo chart presentation-ready: rebuild line colors and data-label formatting from your model's field parameters, with one command."
+version = "1.1.0"
+description = "Make every Power BI combo chart presentation-ready: style series colors and data labels from your model's field parameters, and check PBIP reports for broken bindings and bookmarks."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Christoforos Kapsalis" }]
