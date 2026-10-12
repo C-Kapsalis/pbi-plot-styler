@@ -303,8 +303,8 @@ content while the source files stay untouched: a preview build.
 The full documentation (a tutorial that declares the three field parameters
 and styles a combo-chart page end to end, a CLI reference covering every
 argument, option, config key, and exit code, and an explanation of why the
-template beats per-visual hand-formatting) is published at
-`pbi-plot-styler-documentation` on Read the Docs.
+template beats per-visual hand-formatting) is published on Read the Docs at
+<https://pbi-plot-styler-documentation.readthedocs.io/en/latest/>.
 
 ## Part of a small family of Power BI tools
 
