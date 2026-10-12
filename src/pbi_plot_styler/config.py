@@ -8,7 +8,7 @@ import dataclasses
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -34,6 +34,21 @@ _HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 class ConfigError(ValueError):
     """Raised for malformed configuration values."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ThemeColor:
+    """A theme-relative color: slot ``color_id`` of the report theme's
+    ``dataColors``, lightened (positive) or darkened (negative) by
+    ``percent``. Serialized as Power BI's ``ThemeDataColor`` expression, so
+    the chart follows a theme change instead of pinning a hex value."""
+
+    color_id: int
+    percent: float = 0
+
+
+#: A series color: a ``#RRGGBB`` literal or a theme-relative color.
+Color = Union[str, ThemeColor]
 
 
 def _require_hex(value: str, key: str) -> str:
@@ -75,6 +90,13 @@ class StylerConfig:
     label_transparency: int = DEFAULT_LABEL_TRANSPARENCY
     #: Whether data labels are switched on.
     show_labels: bool = True
+    #: Theme ``dataColors`` slot used instead of ``line_color`` when set.
+    theme_color_id: int | None = None
+    #: Lighten (>0) or darken (<0) the theme color, -1.0 to 1.0.
+    theme_color_percent: float = 0
+    #: Per-measure pins, ``"Table.Measure"`` -> ``#RRGGBB``. A pin beats the
+    #: palette, the theme color and ``line_color`` for that one measure.
+    colors: tuple[tuple[str, str], ...] = ()
     #: Names of the fields above that a config file or CLI flag set
     #: explicitly. Label settings a visual already carries are kept unless
     #: the user explicitly configured them (see ``report.restyle_visual``).
@@ -99,6 +121,30 @@ class StylerConfig:
         _require_hex(self.label_color, "label_color")
         if self.label_background is not None:
             _require_hex(self.label_background, "label_background")
+        for key, color in self.colors:
+            if not isinstance(key, str) or "." not in key:
+                raise ConfigError(
+                    f"color pin {key!r} is not a \"Table.Measure\" key, for "
+                    f"example \"Sales Measures.Revenue\"."
+                )
+            _require_hex(color, f"color pin for {key!r}")
+        if self.theme_color_id is not None and (
+            isinstance(self.theme_color_id, bool)
+            or not isinstance(self.theme_color_id, int)
+            or self.theme_color_id < 0
+        ):
+            raise ConfigError(
+                f"theme_color_id is set to {self.theme_color_id!r}. Use a "
+                f"non-negative integer: the index into the theme's dataColors."
+            )
+        if isinstance(self.theme_color_percent, bool) or not isinstance(
+            self.theme_color_percent, (int, float)
+        ) or not -1 <= self.theme_color_percent <= 1:
+            raise ConfigError(
+                f"theme_color_percent is set to {self.theme_color_percent!r}, "
+                f"which is out of range. Use a number between -1 (darkest) "
+                f"and 1 (lightest); 0 is the theme color itself."
+            )
         if not isinstance(self.label_transparency, int) or not (
             0 <= self.label_transparency <= 100
         ):
@@ -109,13 +155,30 @@ class StylerConfig:
             )
 
     # -- per-measure color resolution -------------------------------------
-    def series_color(self, measure_key: str, slot: int) -> str:
-        """The series fill for a measure: its palette slot, or line_color."""
+    def _pin_for(self, measure_key: str) -> str | None:
+        lowered = measure_key.lower()
+        for key, color in self.colors:
+            if key.lower() == lowered:
+                return color.upper() if color.islower() else color
+        return None
+
+    def series_color(self, measure_key: str, slot: int) -> Color:
+        """The series fill for a measure.
+
+        Precedence: a ``colors`` pin, then the palette (indexed by the
+        measure's stable ``slot``), then ``theme_color_id``, then
+        ``line_color``.
+        """
+        pinned = self._pin_for(measure_key)
+        if pinned is not None:
+            return pinned
         if self.palette:
             return self.palette[slot % len(self.palette)]
+        if self.theme_color_id is not None:
+            return ThemeColor(self.theme_color_id, self.theme_color_percent)
         return self.line_color
 
-    def label_background_for(self, measure_key: str, slot: int) -> str:
+    def label_background_for(self, measure_key: str, slot: int) -> Color:
         """The label background: explicit hex, or match the series color."""
         if self.label_background is not None:
             return self.label_background
@@ -132,6 +195,9 @@ _KNOWN_STYLE_KEYS = {
     "label_background",
     "label_transparency",
     "show_labels",
+    "theme_color_id",
+    "theme_color_percent",
+    "colors",
 }
 
 
@@ -228,17 +294,28 @@ def load_config_file(path: Path) -> dict[str, Any]:
         "label_background",
         "label_transparency",
         "show_labels",
+        "theme_color_id",
+        "theme_color_percent",
     ):
         if key in style:
             overrides[key] = style[key]
     if "palette" in style:
         overrides["palette"] = tuple(style["palette"])
+    if "colors" in style:
+        if not isinstance(style["colors"], dict):
+            raise ConfigError(
+                f"{path} [style] colors must be a table of "
+                f"\"Table.Measure\" = \"#RRGGBB\" pairs, for example a "
+                f"[style.colors] section."
+            )
+        overrides["color_pins"] = dict(style["colors"])
     return overrides
 
 
 def build_config(
     config_path: Path | None = None,
     table_renames: dict[str, str] | None = None,
+    color_pins: dict[str, str] | None = None,
     **cli_overrides: Any,
 ) -> StylerConfig:
     """Merge defaults, an optional config file, and CLI overrides.
@@ -248,10 +325,12 @@ def build_config(
     ``--rename-table``) is applied last, on top of whatever
     ``field_parameter_tables`` resolved to from the config file, an
     explicit ``--table`` override, or the built-in default, so renaming
-    one table never requires respecifying the other two.
+    one table never requires respecifying the other two. ``color_pins``
+    (from ``--color``) merge over the file's ``[style.colors]`` per key.
     """
     values: dict[str, Any] = {}
     file_renames: dict[str, str] = {}
+    file_pins: dict[str, str] = {}
     if config_path is not None:
         if not config_path.is_file():
             raise ConfigError(
@@ -260,6 +339,7 @@ def build_config(
             )
         file_overrides = load_config_file(config_path)
         file_renames = file_overrides.pop("table_renames", {})
+        file_pins = file_overrides.pop("color_pins", {})
         values.update(file_overrides)
     values.update({k: v for k, v in cli_overrides.items() if v is not None})
 
@@ -271,6 +351,10 @@ def build_config(
         values["field_parameter_tables"] = apply_table_renames(
             base_tables, renames
         )
+
+    pins = {**file_pins, **(color_pins or {})}
+    if pins:
+        values["colors"] = tuple(sorted(pins.items()))
 
     values["explicit"] = frozenset(values)
     config = StylerConfig(**values)

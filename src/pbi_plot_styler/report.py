@@ -34,11 +34,11 @@ import copy
 import difflib
 import json
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping
 
-from .config import StylerConfig
+from .config import Color, StylerConfig, ThemeColor
 
 JSON_INDENT = 2
 
@@ -59,13 +59,29 @@ def _literal(value: str) -> dict:
     return {"expr": {"Literal": {"Value": value}}}
 
 
-def _solid_color(hex_color: str) -> dict:
+def _solid_color(color: Color) -> dict:
+    if isinstance(color, ThemeColor):
+        percent = color.percent
+        if isinstance(percent, float) and percent.is_integer():
+            percent = int(percent)
+        return {
+            "solid": {
+                "color": {
+                    "expr": {
+                        "ThemeDataColor": {
+                            "ColorId": color.color_id,
+                            "Percent": percent,
+                        }
+                    }
+                }
+            }
+        }
     # Power BI encodes literal colors as a quoted string literal expression.
-    return {"solid": {"color": _literal(f"'{hex_color}'")}}
+    return {"solid": {"color": _literal(f"'{color}'")}}
 
 
 def datapoint_entry(
-    measure_key: str, color: str, existing: dict | None = None
+    measure_key: str, color: Color, existing: dict | None = None
 ) -> dict:
     """A ``dataPoint[]`` entry: series fill for one measure.
 
@@ -91,7 +107,7 @@ def labels_default_entry(config: StylerConfig) -> dict:
 
 def labels_entry(
     measure_key: str,
-    background: str,
+    background: Color,
     transparency: int,
     existing: dict | None = None,
     *,
@@ -336,7 +352,51 @@ def role_measure_keys(
     return keys
 
 
-# -- report traversal ---------------------------------------------------------
+# -- report discovery ---------------------------------------------------------
+def is_report_dir(path: Path) -> bool:
+    return (path / "definition.pbir").is_file() or (
+        path / "definition" / "pages"
+    ).is_dir()
+
+
+@dataclass(frozen=True)
+class Discovery:
+    """The report folders found under a path, plus the ones skipped."""
+
+    reports: list[Path]
+    skipped: list[tuple[Path, str]] = field(default_factory=list)
+    #: True when the path itself was a report folder.
+    single: bool = False
+
+
+def discover_reports(path: Path) -> Discovery:
+    """Resolve ``path`` to one or more PBIP report folders.
+
+    ``path`` is either a ``*.Report`` folder itself, or any directory that
+    contains one or more ``*.Report`` folders at any depth (a project
+    folder, a monorepo subtree). Nested discovery uses a recursive search,
+    so report trees kept in subfolders are never silently missed. A
+    discovered folder without ``definition/pages`` (a legacy, non-PBIR
+    report) is skipped and reported.
+    """
+    if is_report_dir(path):
+        return Discovery(reports=[path], single=True)
+    reports: list[Path] = []
+    skipped: list[tuple[Path, str]] = []
+    for candidate in sorted(path.rglob("*.Report")):
+        if not candidate.is_dir():
+            continue
+        if any(parent in reports for parent in candidate.parents):
+            continue
+        if (candidate / "definition" / "pages").is_dir():
+            reports.append(candidate)
+        else:
+            skipped.append(
+                (candidate, "no definition/pages (not saved in PBIR format)")
+            )
+    return Discovery(reports=reports, skipped=skipped)
+
+
 def resolve_model_dir(report_dir: Path) -> Path:
     """Locate the semantic model paired with a report via ``definition.pbir``."""
     pbir = report_dir / "definition.pbir"
@@ -416,12 +476,13 @@ def plan_changes(
     config: StylerConfig,
     *,
     catalogs: Mapping[str, list[str]] | None = None,
+    slots: Mapping[str, int] | None = None,
 ) -> list[VisualChange]:
     """Compute the rewrite for every targeted visual (changed or not).
 
     ``catalogs`` (field-parameter table -> measure keys) lets an excluded
     role bound through a field parameter exclude that parameter's whole
-    catalog.
+    catalog; ``slots`` fixes each measure's palette slot.
     """
     changes: list[VisualChange] = []
     for visual_file in iter_visual_files(report_dir):
@@ -438,7 +499,7 @@ def plan_changes(
         for role in config.exclude_current_roles:
             excluded |= role_measure_keys(data, role, catalogs)
         new_data = restyle_visual(
-            data, measure_keys, config, excluded=excluded
+            data, measure_keys, config, excluded=excluded, slots=slots
         )
         if new_data == data:
             new_text = old_text  # already in style: leave every byte alone
@@ -468,19 +529,30 @@ def apply_changes(changes: list[VisualChange]) -> int:
 
 
 def write_zip(
-    report_dir: Path, changes: list[VisualChange], out_path: Path
+    report_dirs: Path | list[Path],
+    changes: list[VisualChange],
+    out_path: Path,
+    *,
+    base: Path | None = None,
 ) -> None:
-    """Emit the styled report folder as a zip archive.
+    """Emit the styled report folder(s) as a zip archive.
 
     The archive always contains the *styled* content, even under
     ``--dry-run``: unchanged files are copied from disk, styled visuals are
-    taken from the computed rewrites.
+    taken from the computed rewrites. Entries are named relative to
+    ``base`` (default: the parent of the first report, so a single report
+    is rooted at its own folder name).
     """
+    if isinstance(report_dirs, Path):
+        report_dirs = [report_dirs]
+    if base is None:
+        base = report_dirs[0].parent
     styled = {change.path: change.new_text for change in changes}
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for file in sorted(p for p in report_dir.rglob("*") if p.is_file()):
-            arcname = (Path(report_dir.name) / file.relative_to(report_dir)).as_posix()
-            if file in styled:
-                archive.writestr(arcname, styled[file].encode("utf-8"))
-            else:
-                archive.write(file, arcname)
+        for report_dir in report_dirs:
+            for file in sorted(p for p in report_dir.rglob("*") if p.is_file()):
+                arcname = file.relative_to(base).as_posix()
+                if file in styled:
+                    archive.writestr(arcname, styled[file].encode("utf-8"))
+                else:
+                    archive.write(file, arcname)

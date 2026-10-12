@@ -287,11 +287,20 @@ def test_config_file_overrides(project, report_dir, tmp_path):
     assert result.exit_code == 0, result.output
 
     objects = _visual(report_dir, "monthlyperformance", "combo01")["visual"]["objects"]
-    fills = [
-        d["properties"]["fill"]["solid"]["color"]["expr"]["Literal"]["Value"]
+    fills = {
+        d["selector"]["metadata"]: d["properties"]["fill"]["solid"]["color"]["expr"]["Literal"]["Value"]
         for d in objects["dataPoint"]
-    ]
-    assert fills[:2] == ["'#7A4419'", "'#C58F5D'"]
+    }
+    # Palette slots follow the field parameter's sort ordinals (Bags Sold #
+    # 10, Revenue 20, Avg Cupping Score 30, Wholesale Margin % 40, Sample
+    # Requests # 70), not the alphabetical order of the keys.
+    assert fills == {
+        "Sales Measures.Bags Sold #": "'#7A4419'",
+        "Sales Measures.Revenue": "'#C58F5D'",
+        "Quality Measures.Avg Cupping Score": "'#7A4419'",
+        "Sales Measures.Wholesale Margin %": "'#C58F5D'",
+        "Sales Measures.Sample Requests #": "'#7A4419'",
+    }
     assert (
         objects["labels"][1]["properties"]["backgroundTransparency"]["expr"]["Literal"]["Value"]
         == "45L"
@@ -412,3 +421,93 @@ def test_apply_never_rewrites_line_endings(report_dir):
     # silently turn every line ending into os.linesep (CRLF on Windows).
     assert _run(report_dir).exit_code == 0
     assert b"\r" not in _combo01_path(report_dir).read_bytes()
+
+
+# -- theme colors, pins ----------------------------------------------------------
+def test_theme_color_id_emits_theme_data_color(report_dir):
+    result = _run(report_dir, "--theme-color-id", "3", "--theme-color-percent", "-0.25")
+    assert result.exit_code == 0, result.output
+    objects = _visual(report_dir, "monthlyperformance", "combo01")["visual"]["objects"]
+    expected = {"expr": {"ThemeDataColor": {"ColorId": 3, "Percent": -0.25}}}
+    assert objects["dataPoint"][0]["properties"]["fill"]["solid"]["color"] == expected
+    assert objects["labels"][1]["properties"]["backgroundColor"]["solid"]["color"] == expected
+
+
+def test_theme_color_from_config_file(report_dir, tmp_path):
+    config_file = tmp_path / "plotstyler.toml"
+    config_file.write_text("[style]\ntheme_color_id = 9\n", encoding="utf-8")
+    result = _run(report_dir, "--config", config_file)
+    assert result.exit_code == 0, result.output
+    fill = _visual(report_dir, "seasonaltrends", "combo02")["visual"]["objects"]["dataPoint"][0]
+    assert fill["properties"]["fill"]["solid"]["color"] == {
+        "expr": {"ThemeDataColor": {"ColorId": 9, "Percent": 0}}
+    }
+
+
+def test_invalid_theme_color_percent_exits_2(report_dir):
+    result = _run(report_dir, "--theme-color-id", "1", "--theme-color-percent", "2")
+    assert result.exit_code == 2
+    assert "theme_color_percent" in result.output
+
+
+def test_color_pins_from_config_and_flag(report_dir, tmp_path):
+    config_file = tmp_path / "plotstyler.toml"
+    config_file.write_text(
+        '[style]\npalette = ["#111111"]\n\n[style.colors]\n'
+        '"Sales Measures.Revenue" = "#7A4419"\n'
+        '"Sales Measures.Bags Sold #" = "#000000"\n',
+        encoding="utf-8",
+    )
+    result = _run(
+        report_dir, "--config", config_file,
+        "--color", "Sales Measures.Bags Sold #=#C58F5D",
+    )
+    assert result.exit_code == 0, result.output
+    fills = {
+        d["selector"]["metadata"]: d["properties"]["fill"]["solid"]["color"]["expr"]["Literal"]["Value"]
+        for d in _visual(report_dir, "monthlyperformance", "combo01")["visual"]["objects"]["dataPoint"]
+    }
+    assert fills["Sales Measures.Revenue"] == "'#7A4419'"
+    assert fills["Sales Measures.Bags Sold #"] == "'#C58F5D'"  # the flag beats the file
+    assert fills["Quality Measures.Avg Cupping Score"] == "'#111111'"
+
+
+def test_unknown_color_pin_exits_2(report_dir):
+    result = _run(report_dir, "--color", "Sales Measures.Revenu=#7A4419")
+    assert result.exit_code == 2
+    assert "Revenu" in result.output
+
+
+# -- multi-report discovery ------------------------------------------------------
+def test_directory_of_reports_styles_each_with_its_own_model(tmp_path, project, brewbar):
+    # Two projects, two different models, nested at different depths.
+    root = tmp_path / "workspace"
+    (root / "nested").mkdir(parents=True)
+    project.rename(root / "roastery")
+    brewbar.rename(root / "nested" / "brewbar")
+
+    result = _run(root, "--dry-run")
+    assert result.exit_code == 1, result.output
+    assert "Report:   nested/brewbar/Brewbar.Report" in result.output
+    assert "Report:   roastery/Roastery.Report" in result.output
+    assert result.output.count("Model:") == 2
+    assert "3/3 visual(s) would change." in result.output
+
+    assert _run(root).exit_code == 0
+    styled = _visual(root / "roastery" / "Roastery.Report", "monthlyperformance", "combo01")
+    assert [d["selector"]["metadata"] for d in styled["visual"]["objects"]["dataPoint"]] == EXPECTED_KEYS
+    assert _run(root, "--dry-run").exit_code == 0
+
+
+def test_directory_without_reports_exits_2(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = _run(empty, "--dry-run")
+    assert result.exit_code == 2
+    assert "no *.Report folders" in result.output
+
+
+def test_zero_targeted_visuals_exits_2(report_dir):
+    result = _run(report_dir, "--visual-type", "pieChart", "--dry-run")
+    assert result.exit_code == 2
+    assert "no targeted visuals" in result.output

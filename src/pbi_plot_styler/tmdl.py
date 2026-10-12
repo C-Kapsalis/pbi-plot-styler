@@ -241,4 +241,31 @@ class SemanticModel:
                 keys.update(e.key for e in self.parameter_catalog(table_name))
         return sorted(keys)
 
+    def palette_slots(self, field_parameter_tables: tuple[str, ...]) -> dict[str, int]:
+        """Each measure's stable palette slot: ``"Table.Measure"`` -> index.
+
+        Tables are taken in configured order; within a table, rows are
+        ordered by their sort ordinal (source position breaks ties and
+        orders rows without one). The first registration of a measure fixes
+        its slot, and a later duplicate does not consume one. A measure's
+        color therefore follows the order an author chose in the model, not
+        the alphabet, so renaming or adding a measure elsewhere in the list
+        does not repaint it.
+        """
+        slots: dict[str, int] = {}
+        for table_name in field_parameter_tables:
+            rows = sorted(
+                self.parameter_catalog(table_name),
+                key=lambda e: (
+                    e.ordinal is None,
+                    e.ordinal if e.ordinal is not None else 0.0,
+                    e.position,
+                ),
+            )
+            for entry in rows:
+                if entry.key not in slots:
+                    slots[entry.key] = len(slots)
+        return slots
+
+
 _ORDINAL_AFTER = re.compile(r"\s*,\s*(-?\d+(?:\.\d+)?)")

@@ -85,3 +85,16 @@ def test_block_commented_tuples_are_ignored(brewbar):
         "Sales Measures.Revenue v1.2 (Adj.)",
     ]
 
+
+def test_palette_slots_follow_ordinals_and_first_registration_wins(brewbar):
+    model = SemanticModel.load(brewbar / "Brewbar.SemanticModel")
+    # Ordinals in the TMDL: Revenue 10, Orders # 20, Avg Ticket 30,
+    # Margin % 40, Revenue v1.2 (Adj.) 50, Revenue again at 70.
+    assert model.palette_slots(("y-Plot Specific",)) == {
+        "Sales Measures.Revenue": 0,
+        "Sales Measures.Orders #": 1,
+        "Sales Measures.Avg Ticket": 2,
+        "Sales Measures.Margin %": 3,
+        "Sales Measures.Revenue v1.2 (Adj.)": 4,
+    }
+
