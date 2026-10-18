@@ -1,0 +1,222 @@
+# Canvas convention rules
+
+`pbi-plot-styler check PATH` runs the `integrity` rule by default (bindings,
+bookmarks, field-parameter slots, theme files; see the README). The rules on
+this page check the conventions of the standard canvas page and run only when
+named with `--rule SLUG` (repeatable). They share the `check` machinery:
+stable ids, `--json`, `--baseline` / `--update-baseline`, exit codes `0` (no
+new errors), `1` (new errors) and `2` (setup problem).
+
+Rules that cannot judge a report say so in a `skipped` list (text output:
+`skipped` lines) instead of passing silently: no y-combo groups, no selector
+slicer, an ambiguous placeholder, no paired model.
+
+## Vocabulary and settings
+
+Every name a rule depends on is a setting with a generic default. Put the
+sections you need in `plotstyler.toml` (read from the working directory, or
+`--config FILE`); sections for `style` and `bookmarks build` can live in the
+same file.
+
+```toml
+[canvas]
+matrix_types = ["pivotTable", "matrix"]
+combo_types = ["lineStackedColumnComboChart"]
+excluded_page_fragments = ["cohort", "ltv"]
+selector_tables = ["x-*", "y-*"]          # exact names or globs
+measure_selector_tables = ["x-*"]
+dimension_selector_tables = ["y-*"]
+exclude_reports = ["M.Report", "-M.Report"]
+
+[gates]
+table = "f-Filters"                       # used in messages only
+slicer_measure = "f-Slicer"
+list_measure = "f-All"
+mode_map = {Dropdown = "slicer_measure", Basic = "list_measure"}
+name_heuristic = false
+
+[category]
+table = "z-Map Dimension-Measure Groupings"
+column = "Analysis Category"
+
+[placeholders]
+blank_dimension_table = "#Report Measures"
+template_slot_table = "Helper Measures"
+
+[panel]
+group_name = "y_filters_group"
+filter_tables = ["y-Selector 3", "y-Selector 4", "y-Selector 5", "y-Selector 6"]
+min_slicers = 6                           # main-page thresholds
+min_combos = 1
+min_matrices = 1
+
+[format_selector]
+table = "z-Selector Format"
+column = "Selector Format"
+item = "Format"
+filter_name = "format_selector_filter"
+
+[answer_bookmarks]
+prefixes = ["Sales |", "Marketing |"]     # required for answer-bookmarks
+main_page = "<page folder>"               # optional; discovered otherwise
+matrix = "<visual id>"                    # optional; the page's only pivotTable
+slicers = {"x-Selector 2" = "<visual id>"}  # optional per parameter
+row_dropdowns = ["<visual id>"]           # optional; slicers on panel.filter_tables
+inherited_fingerprints = []
+submenu_prefix = "Submenu"
+slot_mode = "values-only"                 # or "all-roles"
+```
+
+Terms used below:
+
+- **Canvas page**: a page with a visual of a `matrix_types` type and one of a
+  `combo_types` type, whose display name contains none of the excluded
+  fragments.
+- **Main page**: the page with at least `min_slicers` slicers, a combo chart
+  and a pivotTable (most slicers wins, then the larger folder name).
+- **Selector slicer**: a slicer whose `Values` projection is a column of a
+  selector table.
+- **Semantic name**: a group's `visualGroup.displayName`, any other visual's
+  `name`.
+
+Report discovery: a `*.Report` folder is checked as is; any other folder is
+searched at every depth. `--report NAME` keeps one report by folder name (with
+or without `.Report`) and overrides `exclude_reports`; `--model-name NAME`
+keeps reports whose `definition.pbir` points at `NAME.SemanticModel`. When
+nothing matches, the run exits `2` and names the filter.
+
+## slicer-gates
+
+Every selector slicer stacks with others on the canvas; a visual-level filter
+on `[f-Slicer] > 0` hides the ones that should not show. A gate is *active*
+when one of its conditions compares the measure greater than 0 (kind 1 with
+`0L`) or at least 1 (kind 2 with `1L`).
+
+- `GAT001`: a selector slicer on a visible canvas page has no active gate.
+- `GAT002`: a bookmark capture of a selector slicer on a canvas page has no
+  active gate under `filters.byName`, so applying the bookmark removes it.
+
+`--fix` binds the gate to the table that declares `f-Slicer` in the paired
+model (never to whatever a stale binding names), replacing an existing
+binding and keeping its name, or appending one. With no declaring table the
+run stops with exit `2` and writes nothing.
+
+## slicer-mode-gates
+
+A dropdown slicer gates on `f-Slicer`, a vertical-list slicer on `f-All`
+(`mode_map`); other modes are out of scope. The host table is the first table
+of a sibling `*.SemanticModel` that declares both measures; without one the
+run exits `2`.
+
+- `GAT003`: the gate for the slicer's mode is absent or passive (visual or
+  bookmark capture).
+- `GAT004`: the gate is active but bound to a table that does not declare it.
+- `GAT005`: a file holds gate references (a gate `Measure`, or the `From` of a
+  filter that mentions a gate) that name another table.
+
+`--fix` writes the gates and repoints stale references. Both gate fixers write
+the same shapes, so running them in either order gives identical files.
+Generated filter names are a stable hash, so reruns agree.
+
+## category-filter
+
+`CAT001`: a bookmark listed in a `bookmarks.json` group (menu chrome such as
+`Year`, `<`, `++`-prefixed or decorated labels skipped; all page-level
+bookmarks when no group lists any) never filters
+`[category.table][category.column]`, so applying it switches every gate off.
+
+## theme
+
+- `THM002` (error): no `themeCollection`.
+- `THM003` (warning): no `customTheme`.
+- `THM004` (error): `report.json` holds quoted hex colour literals; one
+  finding with the count and up to 8 samples.
+- `THM005` (error): neither a base nor a custom theme.
+- `THM006` (error): the base or the custom theme is missing (names which).
+
+## visual-position
+
+`POS001` (warning): a visual has no `position.x` or `position.y`.
+
+## y-combo
+
+- `YCG001`: a group named like a y-combo group does not match
+  `y<N>_combo_group` exactly.
+- `YCG002`: a `y<N>_*` member is not inside an existing `y<N>_combo_group`.
+
+## filter-panel
+
+Skipped when the report has no group containers.
+
+- `PNL001`: no visual is named `panel.group_name`.
+- `PNL002` (warning): it exists but is not a group.
+
+`--fix` works on the main page: the master is the visible group (display name
+not starting with `_`) that holds slicers of at least two filter tables, most
+tables first, then the deepest, then the smallest name. It is renamed, child
+`parentGroupName` links and bookmark references follow, and the folder is
+renamed last. An existing folder with the target name stops the fix (exit 2).
+
+## format-selector
+
+Active only when the paired model has the `format_selector.table`.
+`FMT001`: `report.json` does not hold exactly one filter on the format
+selector column that selects `'Format'` and is hidden and locked in view mode
+(the message names the first failing condition). `--fix` replaces the
+targeting filters with one canonical filter at the front, keeping the first
+filter's name.
+
+## stale-placeholders
+
+Each dimension selector offers one blank-dimension placeholder column
+(`NAMEOF('#Report Measures'[z])`). `PLH001`: a visual role or bookmark capture
+bound to `y-*` selectors projects a placeholder those selectors do not offer
+(bookmark captures also check their `byExpr` filters and `orderBy`). Roles
+whose selectors offer several placeholders are skipped as ambiguous. `--fix`
+sets the offered placeholder and updates `queryRef` / `nativeQueryRef`.
+
+## answer-bookmarks
+
+Answer bookmarks are the bookmarks whose display name starts with one of
+`answer_bookmarks.prefixes` (required). Finding subjects start with the
+bookmark's display name, so a baseline entry reads
+`<file>::<display name>`.
+
+| Id | Finding |
+|---|---|
+| `ABK000` | No bookmark matches the prefixes (the suite would check nothing) |
+| `ABK001` | `options.targetVisualNames` is missing or not exactly `[]` |
+| `ABK003` | The matrix is not captured, or captured as hidden |
+| `ABK004` | Matrix rows differ from the row picker's picks, or the capture carries an inherited fingerprint |
+| `ABK005` | The capture keeps `Values` in `activeProjections`, or expansion states |
+| `ABK006` | A captured picker selects nothing |
+| `ABK007` | The analysis category is not pinned with a literal |
+| `ABK008` | The bookmark is not a child of a `Submenu` group |
+| `ABK009` | The matrix slot map does not match the declared parameters or the picks |
+| `ABK010` | A row field is missing from the dropdown filters |
+| `PGW001` | A field-parameter well on the main page projects a raw measure |
+| `PGW002` | A bookmark navigator on the main page selects a bookmark with no file |
+
+Selections are read only from each slicer's saved filter, never from its
+cached display items. Page and visual ids are discovered when not configured;
+a main page or matrix that cannot be determined is a setup error (exit 2),
+not a pass. Overlapping parameter slots on any page are the integrity rule's
+`FPM001` / `FPM002`.
+
+## bookmark-literals
+
+Each selector table registers the rows its `NAMEOF` tuples name (a bare
+`[Measure]` resolves to the table declaring it). For each bookmark (or only
+those named in `--only-display-names FILE.json`), every selection literal of
+the active section is checked:
+
+- `BML001`: a picker's literal is registered in another selector, not in the
+  one behind this picker.
+- `BML002`: the literal is registered in no selector.
+
+## --summary
+
+`check --summary` runs `slicer-gates`, `category-filter`, `theme` and
+`filter-panel` and reports per rule how many components were checked and
+passed and whether it is compliant (no error among its critical ids), plus
+the overall percentage. It never fails; `--json` adds a `compliance` object.
