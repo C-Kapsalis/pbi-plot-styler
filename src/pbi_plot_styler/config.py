@@ -28,6 +28,8 @@ DEFAULT_LINE_COLOR = "#118DFF"
 DEFAULT_LABEL_COLOR = "#252423"
 DEFAULT_LABEL_TRANSPARENCY = 20
 DEFAULT_CONFIG_FILENAME = "plotstyler.toml"
+DEFAULT_LINE_ROLE = "Y2"
+DEFAULT_COLUMN_ROLE = "Y"
 
 _HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -97,6 +99,19 @@ class StylerConfig:
     #: Per-measure pins, ``"Table.Measure"`` -> ``#RRGGBB``. A pin beats the
     #: palette, the theme color and ``line_color`` for that one measure.
     colors: tuple[tuple[str, str], ...] = ()
+    #: Properties of the no-selector ``labels`` entry seeded on a visual that
+    #: has none, as ``(name, DAX literal text)`` pairs. Empty means the
+    #: built-in set (``show``, ``color``, ``enableBackground``).
+    label_default_properties: tuple[tuple[str, str], ...] = ()
+    #: Whether an existing no-selector ``labels`` entry is touched at all
+    #: (``enableBackground`` forced on, explicit ``show`` / ``color``).
+    touch_existing_label_default: bool = True
+    #: Rebind a stale line (``line_role``) measure projection to the model's
+    #: current measure name before styling (``--rebind-stale-line``).
+    rebind_stale_line: bool = False
+    #: The query role drawn as the line, and the one drawn as columns.
+    line_role: str = DEFAULT_LINE_ROLE
+    column_role: str = DEFAULT_COLUMN_ROLE
     #: Names of the fields above that a config file or CLI flag set
     #: explicitly. Label settings a visual already carries are kept unless
     #: the user explicitly configured them (see ``report.restyle_visual``).
@@ -145,6 +160,14 @@ class StylerConfig:
                 f"which is out of range. Use a number between -1 (darkest) "
                 f"and 1 (lightest); 0 is the theme color itself."
             )
+        for name, value in self.label_default_properties:
+            if not isinstance(name, str) or not isinstance(value, str) or not name:
+                raise ConfigError(
+                    "label_default_properties must map property names to DAX "
+                    "literal texts, for example {enableBackground = \"true\"}."
+                )
+        if not isinstance(self.touch_existing_label_default, bool):
+            raise ConfigError("touch_existing_label_default must be true or false.")
         if not isinstance(self.label_transparency, int) or not (
             0 <= self.label_transparency <= 100
         ):
@@ -186,9 +209,17 @@ class StylerConfig:
 
 
 _KNOWN_SECTIONS = {"tables", "targets", "style"}
+#: Sections read by other commands (``check`` rules, ``bookmarks build``);
+#: ``style`` accepts and ignores them so one plotstyler.toml serves all.
+_OTHER_SECTIONS = {
+    "canvas", "gates", "category", "placeholders", "panel", "caption",
+    "format_selector", "answer_bookmarks", "bookmarks",
+}
 _KNOWN_TABLES_KEYS = {"field_parameters", "renames"}
-_KNOWN_TARGETS_KEYS = {"visual_types", "exclude_current_roles"}
+_KNOWN_TARGETS_KEYS = {"visual_types", "exclude_current_roles", "line_role", "column_role"}
 _KNOWN_STYLE_KEYS = {
+    "label_default_properties",
+    "touch_existing_label_default",
     "line_color",
     "palette",
     "label_color",
@@ -261,12 +292,13 @@ def load_config_file(path: Path) -> dict[str, Any]:
             f"{path} is not valid TOML: {exc}. Fix the syntax and rerun."
         ) from exc
 
-    unknown_sections = set(raw) - _KNOWN_SECTIONS
+    unknown_sections = set(raw) - _KNOWN_SECTIONS - _OTHER_SECTIONS
     if unknown_sections:
         raise ConfigError(
             f"{path} has unknown section(s): "
             f"{', '.join(sorted(unknown_sections))}. Valid sections are "
-            f"[tables], [targets], and [style]."
+            f"[tables], [targets], [style], and the check / bookmarks "
+            f"sections ({', '.join(sorted(_OTHER_SECTIONS))})."
         )
 
     overrides: dict[str, Any] = {}
@@ -285,6 +317,9 @@ def load_config_file(path: Path) -> dict[str, Any]:
         overrides["exclude_current_roles"] = tuple(
             targets["exclude_current_roles"]
         )
+    for key in ("line_role", "column_role"):
+        if key in targets:
+            overrides[key] = targets[key]
 
     style = raw.get("style", {})
     _reject_unknown_keys(path, "style", style, _KNOWN_STYLE_KEYS)
@@ -296,9 +331,18 @@ def load_config_file(path: Path) -> dict[str, Any]:
         "show_labels",
         "theme_color_id",
         "theme_color_percent",
+        "touch_existing_label_default",
     ):
         if key in style:
             overrides[key] = style[key]
+    if "label_default_properties" in style:
+        props = style["label_default_properties"]
+        if not isinstance(props, dict):
+            raise ConfigError(
+                f"{path} [style] label_default_properties must be a table of "
+                f"property = \"DAX literal\" pairs."
+            )
+        overrides["label_default_properties"] = tuple(props.items())
     if "palette" in style:
         overrides["palette"] = tuple(style["palette"])
     if "colors" in style:

@@ -1,0 +1,119 @@
+"""PNL001 / PNL002: the canvas filter slicers live in one named master group."""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from ..canvas import Visual, dig
+from . import RuleContext, RuleError, rewrite_json
+
+
+def check_filter_panel(ctx: RuleContext) -> None:
+    target = ctx.settings.panel.group_name
+    visuals = list(ctx.index.visuals())
+    if not any(v.vtype in ("group", "unknown") for v in visuals):
+        ctx.checked["filter-panel"] = 0
+        ctx.skip("filter-panel: the report has no group containers")
+        return
+    ctx.checked["filter-panel"] = 1
+    master = next((v for v in visuals if v.semantic_name == target), None)
+    definition = ctx.report_dir / "definition"
+    if master is None:
+        ctx.add("PNL001", definition / "pages", target,
+                f"no visual is named {target!r}; panel bookmarks and tooling "
+                f"cannot find the filter region", fixable=True)
+    elif master.vtype not in ("group", "unknown"):
+        ctx.add("PNL002", master.path, target,
+                f"{target!r} is a {master.vtype}, not a group container")
+
+
+def _filter_tables_in(path: Path, tables: tuple[str, ...]) -> set[str]:
+    text = path.read_bytes().decode("utf-8-sig")
+    return {
+        table for table in tables
+        if re.search(r'"Entity"\s*:\s*' + re.escape(f'"{table}"'), text)
+    }
+
+
+def _master_candidate(visuals: dict[str, Visual], tables: tuple[str, ...]) -> Visual | None:
+    coverage: dict[str, set[str]] = {}
+    depth: dict[str, int] = {}
+
+    def chain(start: Visual) -> list[str]:
+        seen: list[str] = []
+        parent = start.parent
+        while parent and parent in visuals and parent not in seen:
+            seen.append(parent)
+            parent = visuals[parent].parent
+        return seen
+
+    for visual in visuals.values():
+        if visual.is_group:
+            continue
+        found = _filter_tables_in(visual.path, tables)
+        if not found:
+            continue
+        for ancestor in chain(visual):
+            coverage.setdefault(ancestor, set()).update(found)
+    for name in coverage:
+        depth[name] = len(chain(visuals[name]))
+
+    def eligible(name: str) -> bool:
+        group = visuals[name]
+        display = dig(group.data, "visualGroup", "displayName")
+        return (
+            len(coverage[name]) >= 2
+            and group.data.get("isHidden") is not True
+            and not (isinstance(display, str) and display.startswith("_"))
+        )
+
+    ranked = sorted(
+        (name for name in coverage if eligible(name)),
+        key=lambda n: (-len(coverage[n]), -depth[n], n),
+    )
+    return visuals[ranked[0]] if ranked else None
+
+
+def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
+    """Rename the detected master group on the main page, with its cascade."""
+    target = ctx.settings.panel.group_name
+    page = ctx.index.main_page(ctx.settings)
+    if page is None:
+        ctx.skip("filter-panel fix: no main page (slicers + combo chart + matrix)")
+        return []
+    visuals = {v.folder: v for v in page.visuals if v.name == v.folder}
+    master = _master_candidate(visuals, ctx.settings.panel.filter_tables)
+    if master is None:
+        ctx.skip("filter-panel fix: no group covers two or more filter tables")
+        return []
+    old = master.name
+    display = dig(master.data, "visualGroup", "displayName")
+    if old == target and display == target:
+        return []
+    if old != target and (page.path / "visuals" / target).exists():
+        raise RuleError(
+            f"cannot rename {old!r} to {target!r}: page {page.page_id} already "
+            f"has a visual folder named {target!r}"
+        )
+
+    changes: list[tuple[Path, str]] = []
+    master.data["name"] = target
+    master.data.setdefault("visualGroup", {})["displayName"] = target
+    rewrite_json(master.path, master.data)
+    changes.append((master.path, f"renamed group {old!r} to {target!r}"))
+    if old != target:
+        for visual in page.visuals:
+            if visual.parent == old and visual is not master:
+                visual.data["parentGroupName"] = target
+                if rewrite_json(visual.path, visual.data):
+                    changes.append((visual.path, f"parentGroupName {old!r} -> {target!r}"))
+        bookmarks = ctx.report_dir / "definition" / "bookmarks"
+        quoted_old, quoted_new = f'"{old}"', f'"{target}"'
+        for path in sorted(bookmarks.glob("*.json")):
+            raw = path.read_bytes()
+            text = raw.decode("utf-8")
+            if quoted_old in text:
+                path.write_bytes(text.replace(quoted_old, quoted_new).encode("utf-8"))
+                changes.append((path, f"{quoted_old} -> {quoted_new}"))
+        master.path.parent.rename(master.path.parent.with_name(target))
+    return changes

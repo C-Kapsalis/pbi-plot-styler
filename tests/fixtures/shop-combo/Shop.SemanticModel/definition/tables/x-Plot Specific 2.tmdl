@@ -1,0 +1,37 @@
+table 'x-Plot Specific 2'
+	lineageTag: 00000000-0000-0000-0000-049096981853
+
+	column 'x-Plot Specific 2'
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'x-Plot Specific 2 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'x-Plot Specific 2 Fields'
+
+	column 'x-Plot Specific 2 Fields'
+		isHidden
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+	column 'x-Plot Specific 2 Order'
+		isHidden
+		formatString: 0
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	partition 'x-Plot Specific 2' = calculated
+		mode: import
+		source =
+				{
+				    ( "Revenue", NAMEOF ( 'Shop Measures'[Revenue] ), 1 ),
+				    ( "Qualifier Margin", NAMEOF ( 'Shop Measures'[Qualifier Margin] ), 2 ),
+				    ( "Avg Basket Size", NAMEOF ( [Avg Basket Size] ), 3 ),
+				    ( "Month", NAMEOF ( 'Calendar'[Month] ), 4 )
+				}

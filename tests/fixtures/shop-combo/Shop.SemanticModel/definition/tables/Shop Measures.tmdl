@@ -1,0 +1,17 @@
+table 'Shop Measures'
+
+	measure Revenue = 1
+		formatString: #,##0
+
+	measure 'Basket Size' = 1
+		formatString: #,##0
+
+	measure 'Avg Basket Size' = 1
+		formatString: #,##0
+
+	measure 'Qualifier Margin' = 1
+		formatString: #,##0
+
+	measure Clicks = 1
+		formatString: #,##0
+

@@ -115,6 +115,21 @@ class CatalogEntry:
     position: int
 
 
+@dataclass(frozen=True)
+class NameofRef:
+    """One ``NAMEOF ( ... )`` argument in a table's DAX."""
+
+    #: The table qualifier as written, or ``None`` for a bare ``[Name]``.
+    qualifier: str | None
+    #: The bracketed name.
+    name: str
+    #: Whether the closing parenthesis is followed by a comma (a tuple
+    #: member of a field-parameter row, not a trailing reference).
+    in_tuple: bool
+    #: The row's sort ordinal (the number after the reference), if any.
+    ordinal: float | None = None
+
+
 @dataclass
 class SemanticModel:
     """A parsed view of a PBIP semantic model's ``definition/tables``."""
@@ -251,6 +266,27 @@ class SemanticModel:
                 if rest_lower.startswith(column.lower() + "."):
                     return True
         return False
+
+    def nameof_refs(self, table: str) -> list[NameofRef]:
+        """Every ``NAMEOF`` argument in ``table``'s TMDL, comments ignored."""
+        real = self.table_named(table)
+        if real is None:
+            return []
+        source = strip_dax_comments(self.raw_by_table[real])
+        refs: list[NameofRef] = []
+        for ref in _NAMEOF_REF.finditer(source):
+            qualifier = _unquote(ref.group(1), ref.group(2), None) or None
+            in_tuple = bool(re.compile(r"\s*,").match(source, ref.end()))
+            ordinal = _ORDINAL_AFTER.match(source, ref.end())
+            refs.append(NameofRef(
+                qualifier, ref.group(3).strip(), in_tuple,
+                float(ordinal.group(1)) if ordinal else None,
+            ))
+        return refs
+
+    def declaring_table(self, measure: str) -> str | None:
+        """The first table (file order) that declares ``measure``."""
+        return self.home_table(measure)
 
     # -- field-parameter scan -------------------------------------------------
     def parameter_catalog(self, table: str) -> list[CatalogEntry]:

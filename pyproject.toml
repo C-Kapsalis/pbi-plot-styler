@@ -40,3 +40,10 @@ packages = ["src/pbi_plot_styler"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "p0: highest-priority report checks",
+    "p1: important report checks",
+    "p2: reporting-only checks",
+    "layer3_5: report-layer (visual and bookmark) tests",
+    "visual_architecture: canvas convention tests",
+]

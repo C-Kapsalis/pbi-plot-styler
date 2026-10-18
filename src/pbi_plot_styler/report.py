@@ -33,12 +33,14 @@ from __future__ import annotations
 import copy
 import difflib
 import json
+import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping
 
 from .config import Color, StylerConfig, ThemeColor
+from .tmdl import SemanticModel
 
 JSON_INDENT = 2
 
@@ -95,7 +97,16 @@ def datapoint_entry(
 
 
 def labels_default_entry(config: StylerConfig) -> dict:
-    """The no-selector ``labels[]`` entry seeded when a visual has none."""
+    """The no-selector ``labels[]`` entry seeded when a visual has none.
+
+    ``label_default_properties`` replaces the built-in property set.
+    """
+    if config.label_default_properties:
+        return {
+            "properties": {
+                name: _literal(value) for name, value in config.label_default_properties
+            }
+        }
     return {
         "properties": {
             "show": _literal("true" if config.show_labels else "false"),
@@ -239,7 +250,9 @@ def restyle_visual(
             enforce_transparency=enforce_transparency,
         ),
     )
-    if lb_defaults:
+    if lb_defaults and not config.touch_existing_label_default:
+        new_defaults = copy.deepcopy(lb_defaults)
+    elif lb_defaults:
         new_defaults = []
         for entry in lb_defaults:
             entry = copy.deepcopy(entry)
@@ -352,6 +365,66 @@ def role_measure_keys(
     return keys
 
 
+# -- stale line rebind ---------------------------------------------------------
+_LEADING_JUNK = re.compile(r"^[^A-Za-z0-9]+")
+
+
+@dataclass(frozen=True)
+class Rebind:
+    """One stale line projection pointed at the model's current measure."""
+
+    entity: str
+    old: str
+    new: str
+
+
+def _rebind_target(model: SemanticModel, entity: str, prop: str) -> str | None:
+    table = model.table_named(entity)
+    if table is None:
+        return None  # not a model table: stale, but there is nothing to bind to
+    measures = model.measures_by_table.get(table, set())
+    if prop in measures:
+        return None  # current
+    stem = _LEADING_JUNK.sub("", prop).strip()
+    if not stem:
+        return None
+    if stem in measures:
+        return stem
+    candidates = sorted(m for m in measures if stem.casefold() in m.casefold())
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def rebind_stale_line(
+    visual_data: dict, model: SemanticModel, line_role: str = "Y2"
+) -> list[Rebind]:
+    """Point stale ``Measure`` projections of the line role at current names.
+
+    A projection is stale when its table does not declare a measure with
+    exactly that name. The name is stripped of leading non-alphanumeric
+    characters; an exact match wins, else a single case-insensitive
+    substring match among the same table's measures. Edits ``visual_data``
+    in place (``Property`` and ``queryRef`` only) and returns the rebinds.
+    """
+    done: list[Rebind] = []
+    block = _query_state(visual_data).get(line_role) or {}
+    for projection in block.get("projections") or []:
+        measure = (projection.get("field") or {}).get("Measure") if isinstance(projection, dict) else None
+        if not isinstance(measure, dict):
+            continue
+        entity, prop = _source_entity(measure), measure.get("Property")
+        if not isinstance(entity, str) or not isinstance(prop, str):
+            continue
+        target = _rebind_target(model, entity, prop)
+        if target is None:
+            continue
+        measure["Property"] = target
+        query_ref = projection.get("queryRef")
+        if isinstance(query_ref, str):
+            projection["queryRef"] = query_ref.replace(f".{prop}", f".{target}")
+        done.append(Rebind(entity, prop, target))
+    return done
+
+
 # -- report discovery ---------------------------------------------------------
 def is_report_dir(path: Path) -> bool:
     return (path / "definition.pbir").is_file() or (
@@ -418,6 +491,19 @@ def resolve_model_dir(report_dir: Path) -> Path:
     return (report_dir / rel).resolve()
 
 
+def report_model_name(report_dir: Path) -> str | None:
+    """The ``<name>`` of the ``<name>.SemanticModel`` a report points at by
+    path, or ``None`` (no pbir, malformed JSON, or a non-byPath reference)."""
+    from .canvas import dig, read_json
+
+    target = dig(read_json(report_dir / "definition.pbir"), "datasetReference", "byPath", "path")
+    if not isinstance(target, str):
+        return None
+    folder = Path(target.replace("\\", "/").rstrip("/")).name
+    stem, dot, kind = folder.rpartition(".")
+    return stem if dot and kind == "SemanticModel" else None
+
+
 def iter_visual_files(report_dir: Path) -> Iterator[Path]:
     """Every ``visual.json`` under the report's pages, in sorted order."""
     pages_dir = report_dir / "definition" / "pages"
@@ -437,6 +523,7 @@ class VisualChange:
     path: Path
     old_text: str
     new_text: str
+    rebinds: tuple[Rebind, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -477,13 +564,20 @@ def plan_changes(
     *,
     catalogs: Mapping[str, list[str]] | None = None,
     slots: Mapping[str, int] | None = None,
+    model: SemanticModel | None = None,
 ) -> list[VisualChange]:
     """Compute the rewrite for every targeted visual (changed or not).
 
     ``catalogs`` (field-parameter table -> measure keys) lets an excluded
     role bound through a field parameter exclude that parameter's whole
-    catalog; ``slots`` fixes each measure's palette slot.
+    catalog; ``slots`` fixes each measure's palette slot. With
+    ``config.rebind_stale_line`` (which needs ``model``), stale line
+    projections are rebound first and the column role counts as column
+    side unless excluded roles are configured.
     """
+    roles = config.exclude_current_roles
+    if config.rebind_stale_line and not roles:
+        roles = (config.column_role,)
     changes: list[VisualChange] = []
     for visual_file in iter_visual_files(report_dir):
         # Read raw bytes so change detection is byte-accurate (no newline
@@ -495,11 +589,16 @@ def plan_changes(
             continue
         if (data.get("visual") or {}).get("visualType") not in config.visual_types:
             continue
+        source = data
+        rebinds: list[Rebind] = []
+        if config.rebind_stale_line and model is not None:
+            source = copy.deepcopy(data)
+            rebinds = rebind_stale_line(source, model, config.line_role)
         excluded: set[str] = set()
-        for role in config.exclude_current_roles:
-            excluded |= role_measure_keys(data, role, catalogs)
+        for role in roles:
+            excluded |= role_measure_keys(source, role, catalogs)
         new_data = restyle_visual(
-            data, measure_keys, config, excluded=excluded, slots=slots
+            source, measure_keys, config, excluded=excluded, slots=slots
         )
         if new_data == data:
             new_text = old_text  # already in style: leave every byte alone
@@ -510,7 +609,8 @@ def plan_changes(
                 newline="\r\n" if "\r\n" in old_text else "\n",
             )
         changes.append(
-            VisualChange(path=visual_file, old_text=old_text, new_text=new_text)
+            VisualChange(path=visual_file, old_text=old_text, new_text=new_text,
+                         rebinds=tuple(rebinds))
         )
     return changes
 

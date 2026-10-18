@@ -1,0 +1,16 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "edit_canvas",
+  "position": {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "width": 400,
+    "height": 400
+  },
+  "visualGroup": {
+    "displayName": "edit canvas",
+    "groupMode": "ScaleMode"
+  },
+  "isHidden": true
+}

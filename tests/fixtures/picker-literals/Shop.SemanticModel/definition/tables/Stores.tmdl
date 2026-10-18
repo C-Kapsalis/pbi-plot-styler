@@ -1,0 +1,12 @@
+table 'Stores'
+
+	column 'Region'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Region
+
+	column 'Code'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Code
+

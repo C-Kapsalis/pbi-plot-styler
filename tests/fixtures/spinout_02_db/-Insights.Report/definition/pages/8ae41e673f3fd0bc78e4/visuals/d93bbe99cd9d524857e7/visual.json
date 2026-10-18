@@ -1,0 +1,52 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "d93bbe99cd9d524857e7",
+  "position": {
+    "x": 10,
+    "y": 120,
+    "z": 1,
+    "width": 200,
+    "height": 40
+  },
+  "visual": {
+    "visualType": "slicer",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Plot Specific 2"
+                    }
+                  },
+                  "Property": "x-Plot Specific 2 Fields"
+                }
+              },
+              "queryRef": "x-Plot Specific 2.x-Plot Specific 2 Fields",
+              "nativeQueryRef": "x-Plot Specific 2 Fields",
+              "active": true
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "data": [
+        {
+          "properties": {
+            "mode": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Dropdown'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

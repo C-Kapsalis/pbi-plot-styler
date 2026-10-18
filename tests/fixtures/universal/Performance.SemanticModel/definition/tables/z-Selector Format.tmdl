@@ -1,0 +1,13 @@
+table 'z-Selector Format'
+	lineageTag: 00000000-0000-4000-8000-000000000700
+
+	calculationGroup
+
+		calculationItem Format = SELECTEDMEASURE ()
+
+	column 'Selector Format'
+		dataType: string
+		lineageTag: 00000000-0000-4000-8000-000000000701
+		summarizeBy: none
+		sourceColumn: Name
+

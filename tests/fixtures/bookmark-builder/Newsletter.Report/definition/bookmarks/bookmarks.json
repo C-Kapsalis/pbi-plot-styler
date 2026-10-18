@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "name": "a348fcf214f494e5d34c",
+      "displayName": "Submenu Letters",
+      "children": [
+        "bb45beb3422017d5f42c"
+      ]
+    },
+    {
+      "name": "ee6dbf6c2baa5d098c14",
+      "displayName": "Submenu Other",
+      "children": []
+    }
+  ]
+}

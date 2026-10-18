@@ -1,0 +1,39 @@
+table 'x-Selector 1'
+	lineageTag: 00000000-0000-4000-8000-000000000500
+
+	column 'x-Selector 1'
+		lineageTag: 00000000-0000-4000-8000-000000000501
+		summarizeBy: none
+		sourceColumn: [Value1]
+
+	column 'x-Selector 1 Fields'
+		isHidden
+		lineageTag: 00000000-0000-4000-8000-000000000502
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+	column 'x-Selector 1 Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-4000-8000-000000000503
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	column 'x-Selector 1 Field Category'
+		lineageTag: 00000000-0000-4000-8000-000000000504
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+	partition 'x-Selector 1' = calculated
+		mode: import
+		source =
+				{
+				    ( "Cost", NAMEOF ( '#Report Measures'[Cost] ), 1, "cost" ),
+				    ( "Clicks", NAMEOF ( '#Report Measures'[Clicks] ), 2, "clicks" )
+				}

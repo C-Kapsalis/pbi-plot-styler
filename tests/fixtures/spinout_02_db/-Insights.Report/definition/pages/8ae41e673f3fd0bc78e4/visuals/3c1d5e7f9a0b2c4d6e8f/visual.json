@@ -1,0 +1,68 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "3c1d5e7f9a0b2c4d6e8f",
+  "position": {
+    "x": 300,
+    "y": 640,
+    "z": 3,
+    "width": 900,
+    "height": 300
+  },
+  "visual": {
+    "visualType": "lineStackedColumnComboChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "CRM Deals"
+                    }
+                  },
+                  "Property": "Close Month"
+                }
+              },
+              "queryRef": "CRM Deals.Close Month"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Plot Specific 1"
+                    }
+                  },
+                  "Property": "x-Plot Specific 1 Fields"
+                }
+              },
+              "queryRef": "x-Plot Specific 1.x-Plot Specific 1 Fields"
+            }
+          ],
+          "fieldParameters": [
+            {
+              "parameterExpr": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Plot Specific 1"
+                    }
+                  },
+                  "Property": "x-Plot Specific 1 Fields"
+                }
+              },
+              "index": 0,
+              "length": 1
+            }
+          ]
+        }
+      }
+    }
+  }
+}

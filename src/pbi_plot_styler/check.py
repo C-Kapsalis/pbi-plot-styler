@@ -28,6 +28,10 @@ THM001  warning   A ``themeCollection`` entry does not resolve to a file
                   under ``StaticResources``.
 ======  ========  ==========================================================
 
+Those are the ``integrity`` rule, which ``check`` runs by default. The
+convention rules (``--rule SLUG``) add their own ids; they are registered in
+:mod:`pbi_plot_styler.rules` and listed in ``CHECKS`` below.
+
 Fixes are surgical text edits: the file is never re-serialized. Each edit
 is proven by parsing the text before and after and requiring that the only
 difference is the intended one; otherwise the fix is refused and the file is
@@ -56,6 +60,39 @@ CHECKS: dict[str, tuple[str, str]] = {
     "FPM001": ("error", "overlapping field-parameter slots"),
     "FPM002": ("error", "field-parameter slots exceed projections"),
     "THM001": ("warning", "theme file not found"),
+    # -- convention rules (``check --rule SLUG``) --
+    "ABK000": ("error", "no answer bookmark matches the configured prefixes"),
+    "ABK001": ("error", "answer bookmark is scoped to some visuals"),
+    "ABK003": ("error", "answer bookmark does not show the matrix"),
+    "ABK004": ("error", "matrix capture holds another bookmark's fields"),
+    "ABK005": ("error", "matrix capture has a stale shape"),
+    "ABK006": ("error", "answer bookmark picker selects nothing"),
+    "ABK007": ("error", "answer bookmark does not pin the analysis category"),
+    "ABK008": ("error", "answer bookmark is not under a submenu"),
+    "ABK009": ("error", "matrix slot map does not match the picks"),
+    "ABK010": ("error", "row dimension has no dropdown filter"),
+    "PGW001": ("error", "raw measure in a field-parameter well"),
+    "PGW002": ("error", "bookmark navigator names a missing bookmark"),
+    "BML001": ("error", "picker literal registered only in another selector"),
+    "BML002": ("error", "picker literal not registered in any selector"),
+    "CAT001": ("error", "bookmark does not set the analysis category"),
+    "GAT001": ("error", "selector slicer has no active gate"),
+    "GAT002": ("error", "bookmark drops a selector slicer's gate"),
+    "GAT003": ("error", "slicer gate missing or passive for its mode"),
+    "GAT004": ("error", "slicer gate bound to the wrong table"),
+    "GAT005": ("error", "stale gate table reference"),
+    "THM002": ("error", "no theme collection"),
+    "THM003": ("warning", "no custom theme"),
+    "THM004": ("error", "hex colour literal in report.json"),
+    "THM005": ("error", "neither a base nor a custom theme"),
+    "THM006": ("error", "base or custom theme missing"),
+    "POS001": ("warning", "visual has no x or y position"),
+    "YCG001": ("error", "y-combo group badly named"),
+    "YCG002": ("error", "y-combo member outside its group"),
+    "PNL001": ("error", "filter-panel master group missing"),
+    "PNL002": ("warning", "filter-panel master is not a group"),
+    "FMT001": ("error", "format-selector filter missing or incomplete"),
+    "PLH001": ("error", "stale blank-dimension placeholder"),
 }
 
 #: The closed set of keys Power BI accepts in a bookmark's ``options``. An
@@ -425,8 +462,10 @@ def _check_field_parameter_slots(ctx: ReportContext, path: Path, data: Any) -> N
             continue
         params = block.get("fieldParameters") or []
         projections = block.get("projections") or []
-        taken: dict[int, str] = {}
+        claimant: dict[int, str] = {}
         for param in params:
+            if not isinstance(param, dict):
+                continue
             column = (param.get("parameterExpr") or {}).get("Column") or {}
             name = (
                 ((column.get("Expression") or {}).get("SourceRef") or {}).get("Entity")
@@ -436,14 +475,22 @@ def _check_field_parameter_slots(ctx: ReportContext, path: Path, data: Any) -> N
             if not isinstance(start, int) or not isinstance(length, int):
                 continue
             for slot in range(start, start + length):
-                if slot in taken and taken[slot] != name:
-                    ctx.add(
-                        "FPM001", path, f"{role}:{taken[slot]}|{name}",
-                        f"{role}: field parameters {taken[slot]!r} and {name!r} "
-                        f"both claim slot {slot}; the later one wins, so the "
-                        f"earlier one's picks never render",
+                earlier = claimant.get(slot)
+                if earlier is not None:
+                    what = (
+                        f"field parameter {name!r} claims slot {slot} twice"
+                        if earlier == name
+                        else f"field parameters {earlier!r} and {name!r} both "
+                        f"claim slot {slot}"
                     )
-                taken.setdefault(slot, name)
+                    ctx.add(
+                        "FPM001", path, f"{role}:{slot}:{earlier}|{name}",
+                        f"{role}: {what}; the later claim wins, so the earlier "
+                        f"picks never render",
+                    )
+                # The latest claimant owns the slot, so a third claim is
+                # paired with the second.
+                claimant[slot] = name
             if length and start + length > len(projections):
                 ctx.add(
                     "FPM002", path, f"{role}:{name}",
@@ -573,8 +620,15 @@ def _extension_measures(ctx: ReportContext, path: Path) -> frozenset[str]:
 def check_report(
     report_dir: Path, root: Path, model: SemanticModel | None
 ) -> list[Finding]:
-    """Run every check against one report folder."""
+    """Run every integrity check against one report folder."""
     ctx = ReportContext(report_dir, root, model)
+    run_integrity(ctx)
+    return sorted(ctx.findings, key=lambda f: (f.file, f.check_id, f.subject))
+
+
+def run_integrity(ctx: ReportContext) -> None:
+    """The default ``integrity`` rule: bindings, bookmarks, slots, themes."""
+    report_dir = ctx.report_dir
     definition = report_dir / "definition"
     ctx.extensions = _extension_measures(ctx, definition / "reportExtensions.json")
     pages = _page_inventory(ctx)
@@ -613,8 +667,6 @@ def check_report(
         loaded = _read(ctx, index)
         if loaded:
             _check_bookmark_index(ctx, index, loaded[1], names)
-
-    return sorted(ctx.findings, key=lambda f: (f.file, f.check_id, f.subject))
 
 
 def fix_report(report_dir: Path) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:

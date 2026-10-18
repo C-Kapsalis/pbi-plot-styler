@@ -1,0 +1,153 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "cd92884eb63c893f0993",
+  "position": {
+    "x": 300,
+    "y": 120,
+    "z": 2,
+    "width": 900,
+    "height": 500
+  },
+  "visual": {
+    "visualType": "pivotTable",
+    "query": {
+      "queryState": {
+        "Rows": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "y-Selector 2"
+                    }
+                  },
+                  "Property": "y-Selector 2 Fields"
+                }
+              },
+              "queryRef": "y-Selector 2.y-Selector 2 Fields",
+              "active": true
+            }
+          ],
+          "fieldParameters": [
+            {
+              "parameterExpr": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "y-Selector 2"
+                    }
+                  },
+                  "Property": "y-Selector 2 Fields"
+                }
+              },
+              "index": 0,
+              "length": 1
+            }
+          ]
+        },
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Plot Specific 1"
+                    }
+                  },
+                  "Property": "x-Plot Specific 1 Fields"
+                }
+              },
+              "queryRef": "x-Plot Specific 1.x-Plot Specific 1 Fields"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Plot Specific 2"
+                    }
+                  },
+                  "Property": "x-Plot Specific 2 Fields"
+                }
+              },
+              "queryRef": "x-Plot Specific 2.x-Plot Specific 2 Fields"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Selector 2"
+                    }
+                  },
+                  "Property": "x-Selector 2 Fields"
+                }
+              },
+              "queryRef": "x-Selector 2.x-Selector 2 Fields"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Helper Measures"
+                    }
+                  },
+                  "Property": "Blank Measure Refined"
+                }
+              },
+              "queryRef": "Helper Measures.Blank Measure Refined"
+            }
+          ],
+          "fieldParameters": [
+            {
+              "parameterExpr": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Plot Specific 1"
+                    }
+                  },
+                  "Property": "x-Plot Specific 1 Fields"
+                }
+              },
+              "index": 0,
+              "length": 1
+            },
+            {
+              "parameterExpr": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Plot Specific 2"
+                    }
+                  },
+                  "Property": "x-Plot Specific 2 Fields"
+                }
+              },
+              "index": 1,
+              "length": 1
+            },
+            {
+              "parameterExpr": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "x-Selector 2"
+                    }
+                  },
+                  "Property": "x-Selector 2 Fields"
+                }
+              },
+              "index": 2,
+              "length": 2
+            }
+          ]
+        }
+      }
+    }
+  },
+  "isHidden": true
+}

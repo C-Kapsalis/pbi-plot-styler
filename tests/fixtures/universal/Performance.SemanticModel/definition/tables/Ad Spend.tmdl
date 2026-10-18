@@ -1,0 +1,30 @@
+table 'Ad Spend'
+	lineageTag: 00000000-0000-4000-8000-000000000100
+
+	column Channel
+		dataType: string
+		lineageTag: 00000000-0000-4000-8000-000000000101
+		summarizeBy: none
+		sourceColumn: Channel
+
+	column Campaign
+		dataType: string
+		lineageTag: 00000000-0000-4000-8000-000000000102
+		summarizeBy: none
+		sourceColumn: Campaign
+
+	column Spend
+		dataType: double
+		lineageTag: 00000000-0000-4000-8000-000000000103
+		summarizeBy: sum
+		sourceColumn: Spend
+
+	column Clicks
+		dataType: int64
+		lineageTag: 00000000-0000-4000-8000-000000000104
+		summarizeBy: sum
+		sourceColumn: Clicks
+
+	partition 'Ad Spend' = m
+		mode: import
+		source = #table({"Channel", "Campaign", "Spend", "Clicks"}, {})

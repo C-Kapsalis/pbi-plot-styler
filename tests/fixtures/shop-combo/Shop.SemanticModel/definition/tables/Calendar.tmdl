@@ -1,0 +1,7 @@
+table 'Calendar'
+
+	column 'Month'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: Month
+
