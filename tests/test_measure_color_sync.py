@@ -8,6 +8,7 @@ Exit codes: 0 changes, 2 no change, 3 invalid input.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -154,4 +155,60 @@ def test_a_slot_expression_it_cannot_read_is_rejected(shop):
     result = run("colors", "sync", *_args(shop), "--apply")
     assert result.exit_code == EXIT_INVALID, result.output
     assert "offset" in result.output
+    assert _snapshot(shop) == before
+
+
+# -- bookmark formatting overrides (objects.merge) ----------------------------------
+BOOKMARK = "b0c0d0e0f0a0b0c0d0e0"
+
+
+def _bookmark_path(shop: Path) -> Path:
+    return shop / "Shop.Report" / "definition" / "bookmarks" / f"{BOOKMARK}.bookmark.json"
+
+
+def _merge_entry(metadata: str, colour: str) -> dict:
+    return {"selector": {"metadata": metadata},
+            "properties": {"fill": {"solid": {"color": {"expr": {"Literal": {"Value": f"'{colour}'"}}}}}}}
+
+
+def _with_overrides(shop: Path) -> None:
+    path = _bookmark_path(shop)
+    data = load(path)
+    section = next(iter(data["explorationState"]["sections"].values()))
+    single = section["visualContainers"]["combo01"]["singleVisual"]
+    single["objects"] = {"merge": {"dataPoint": [
+        _merge_entry("Sales Measures.Revenue", "#000000"),
+        _merge_entry("Sales Measures.Basket Size", "#abcdef"),
+    ]}}
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _overrides(shop: Path) -> dict[str, dict]:
+    data = load(_bookmark_path(shop))
+    section = next(iter(data["explorationState"]["sections"].values()))
+    merge = section["visualContainers"]["combo01"]["singleVisual"]["objects"]["merge"]
+    return {e["selector"]["metadata"]: e for e in merge["dataPoint"]}
+
+
+def test_existing_bookmark_overrides_are_recoloured_and_none_are_added(shop):
+    _with_overrides(shop)
+    result = run("colors", "sync", *_args(shop), "--apply")
+    assert result.exit_code == EXIT_CHANGES, result.output
+    assert "overrides" in result.output
+    entries = _overrides(shop)
+    assert _fill(entries["Sales Measures.Revenue"]) == {"Literal": {"Value": "'#222222'"}}
+    # Y2 / unneeded entries keep their colour; no entry is created for Orders
+    assert _fill(entries["Sales Measures.Basket Size"]) == {"Literal": {"Value": "'#abcdef'"}}
+    assert "Sales Measures.Orders" not in entries
+    before = _snapshot(shop)
+    assert run("colors", "sync", *_args(shop), "--apply").exit_code == EXIT_NONE
+    assert _snapshot(shop) == before
+
+
+def test_a_dry_run_leaves_bookmark_overrides_alone(shop):
+    _with_overrides(shop)
+    before = _snapshot(shop)
+    result = run("colors", "sync", *_args(shop))
+    assert result.exit_code == EXIT_PENDING, result.output
+    assert "overrides" in result.output
     assert _snapshot(shop) == before
