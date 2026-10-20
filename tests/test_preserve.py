@@ -185,3 +185,11 @@ def test_crlf_line_endings_are_preserved(brewbar_report):
     assert b"\r\n" in raw
     assert b"\n" not in raw.replace(b"\r\n", b"")
     assert raw.endswith(b"\r\n")
+
+
+def test_an_entry_with_an_unknown_selector_shape_is_kept():
+    lit = {"expr": {"Literal": {"Value": "'#123456'"}}}
+    odd = {"properties": {"fill": {"solid": {"color": lit}}}, "selector": {"id": "x", "metadata": "M.A"}}
+    visual = {"visual": {"visualType": "lineClusteredColumnComboChart", "objects": {"dataPoint": [odd]}}}
+    out = restyle_visual(visual, ["M.A"], StylerConfig())
+    assert odd in out["visual"]["objects"]["dataPoint"]

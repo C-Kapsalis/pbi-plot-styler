@@ -237,3 +237,34 @@ def test_summary_theme_row_counts_only_the_rule_6_checks(tmp_path):
     # the both-themes check still runs under --rule theme
     payload = json.loads(run("check", client, "--rule", "theme", "--json").output)
     assert "THM006" in {f["id"] for f in payload["findings"]}
+
+
+# -- discovery ---------------------------------------------------------------------
+def test_a_bare_sweep_over_a_folder_without_reports_exits_0(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = run("check", empty)
+    assert result.exit_code == 0, result.output
+    assert "nothing to check" in result.output
+    payload = json.loads(run("check", empty, "--json").output)
+    assert payload["exit_code"] == 0 and payload["reports"] == []
+
+
+def test_a_filter_that_matches_nothing_still_exits_2(tmp_path):
+    client = copy_fixture("universal", tmp_path)
+    assert run("check", client, "--report", "No Such").exit_code == 2
+
+
+def test_reports_in_nested_trees_are_found(tmp_path):
+    root = tmp_path / "a" / "b"
+    copy_fixture("universal", root)
+    payload = json.loads(run("check", tmp_path, "--json").output)
+    assert payload["reports"] == ["a/b/universal/-Report.Report"]
+
+
+def test_fix_exits_from_the_recheck(tmp_path):
+    canvas = copy_fixture("gate-order", tmp_path)
+    gates = canvas / "Growth.SemanticModel" / "definition" / "tables" / "f-Filters.tmdl"
+    gates.write_text("table 'f-Filters'\n\n\tmeasure 'f-All' = 1\n", encoding="utf-8")
+    result = run("check", canvas, "--rule", "slicer-gates", "--fix")
+    assert result.exit_code == 1, result.output   # the fix could not run; the re-check fails

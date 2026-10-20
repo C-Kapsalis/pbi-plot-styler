@@ -78,3 +78,20 @@ def test_a_replacement_that_breaks_json_aborts(client):
     result = run("rename-label", client, "--pair", OLD, 'Bad"Label', "--apply")
     assert result.exit_code != 0
     assert bookmark.read_bytes() == before
+
+
+def test_output_lists_counts_first_and_files_in_visiting_order(client):
+    result = run("rename-label", client, "--pair", OLD, NEW, "--pair", "Nothing Here", "X")
+    lines = result.output.splitlines()
+    assert lines[0] == f'3  "{OLD}" -> "{NEW}"'
+    assert lines[1] == '0  "Nothing Here" -> "X"'
+    files = [ln.strip() for ln in lines if ln.startswith("  ")]
+    assert files[0] == "Growth.SemanticModel/definition/tables/x-Selector 1.tmdl"
+    assert files[1:] == sorted(files[1:])
+
+
+def test_rename_label_is_all_or_nothing(client):
+    # the TMDL file would be fine; the bookmark that breaks stops every write
+    before = _snapshot(client)
+    assert run("rename-label", client, "--pair", OLD, 'Bad"Label', "--apply").exit_code == 2
+    assert _snapshot(client) == before

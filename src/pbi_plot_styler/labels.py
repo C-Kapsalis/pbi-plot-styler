@@ -91,7 +91,7 @@ def rename_labels(
                 ) from exc
         pending[path] = ((b"\xef\xbb\xbf" if bom else b""), text)
     result.counts = [(old, new, totals[old]) for old, new in ordered]
-    result.touched = sorted(pending)
+    result.touched = list(pending)  # visiting order: model tables first
     if apply:
         for path, (bom, text) in pending.items():
             path.write_bytes(bom + text.encode("utf-8"))

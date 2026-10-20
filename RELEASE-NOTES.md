@@ -317,6 +317,18 @@
   folder that hold exploration state (`bookmarks.json` excepted).
 - `y-combo`: a member name needs at least one character after
   `y<N>_`.
+- `rename-label` prints each pair's count first, right-aligned, then the
+  quoted pair, and lists touched files in visiting order (model tables
+  first) with `/` separators.
+- `check` over a folder with no `*.Report` folder prints "nothing to check"
+  and exits `0` (it exited `2`); a `--report` / `--model-name` filter that
+  matches nothing still exits `2`. Reports are found in nested trees.
+- `check --fix` exits from the re-check (documented in docs/commands.md).
+- BUGFIX (kept): `style` keeps formatting entries whose selector shape it
+  does not know, verbatim and in order, instead of dropping them.
+- BUGFIX (kept): `rename-measure` follows dotted measure names, treats the
+  new name literally and its dry-run count equals the rewrite count;
+  `rename-label` is all or nothing.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

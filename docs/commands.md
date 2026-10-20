@@ -1,5 +1,12 @@
 # Commands beyond style and check
 
+`check --fix` runs the fixers and then checks again from disk: its exit code
+comes from that re-check (`0` clean, `1` findings left), so a fix that could
+not repair everything still fails the run. `check` over a folder that holds
+no `*.Report` folder prints that there is nothing to check and exits `0`; a
+`--report` or `--model-name` filter that matches nothing exits `2`. Reports
+are found at any depth.
+
 ## colors sync / colors reset
 
 ```bash
@@ -173,5 +180,8 @@ Replaces the quoted label (`"OLD"`, never the bare text) in the `x-*` selector
 tables (`--table-pattern`) of every model directly under the folder and in the
 visuals, pages and bookmarks of every report below it. With several pairs the
 longest old label goes first. A JSON file that would no longer parse stops
-the run with nothing written. Prints one count line per pair, then `DRY RUN`
-or `APPLIED` with the touched files.
+the run with nothing written: the rename is all or nothing. Prints one line
+per pair, the count first (right-aligned) and then the quoted pair, then
+`DRY RUN` or `APPLIED` with the touched files in visiting order (model tables
+first, then reports). Paths are relative to the client folder and always use
+`/`, on Windows too.

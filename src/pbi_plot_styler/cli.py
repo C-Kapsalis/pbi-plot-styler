@@ -694,6 +694,16 @@ def check(
     for skipped, reason in discovery.skipped:
         if not as_json:
             click.echo(f"Skipped:  {skipped.relative_to(path).as_posix()} ({reason})", err=True)
+    if not reports and not filters:
+        # a bare sweep over a folder with no reports: nothing to check
+        message = f"no *.Report folders under {path}; nothing to check"
+        if as_json:
+            click.echo(json.dumps({"tool": "pbi-plot-styler", "version": __version__,
+                                   "rules": slugs, "reports": [], "findings": [],
+                                   "notes": [message], "exit_code": EXIT_OK}, indent=2))
+        else:
+            click.echo(message)
+        sys.exit(EXIT_OK)
     if not reports:
         named = f" matching {' and '.join(filters)}" if filters else ""
         raise StylerError(
@@ -1148,8 +1158,9 @@ def rename_label(client_dir: Path, pairs, patterns, apply: bool) -> None:
                                patterns=tuple(patterns) or ("x-*",))
     except LabelRenameError as exc:
         raise StylerError(str(exc)) from exc
+    width = max(len(str(count)) for _, _, count in result.counts)
     for old, new, count in result.counts:
-        click.echo(f'"{old}" -> "{new}": {count} occurrence(s)')
+        click.echo(f'{count:>{width}}  "{old}" -> "{new}"')
     verb = "APPLIED" if apply else "DRY RUN"
     click.echo(f"{verb}: {len(result.touched)} file(s)")
     for path in result.touched:

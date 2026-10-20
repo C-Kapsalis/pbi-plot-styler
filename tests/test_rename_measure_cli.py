@@ -102,3 +102,16 @@ def test_cli_keeps_bom_and_crlf(tmp_path):
     assert raw.startswith(BOM)
     assert b"\r\n" in raw and b"\n" not in raw.replace(b"\r\n", b"")
     assert b'"New"' in raw
+
+
+def test_a_dotted_measure_name_is_followed():
+    node = {"projections": [_measure_projection("Rate v1.2")]}
+    assert count_tree(node, "Rate v1.2") == rewrite_tree(copy.deepcopy(node), "Rate v1.2", "Rate") == 4
+    rewrite_tree(node, "Rate v1.2", "Rate")
+    assert node["projections"][0] == _measure_projection("Rate")
+
+
+def test_the_new_name_is_taken_literally():
+    node = {"projections": [_measure_projection("Spend")]}
+    rewrite_tree(node, "Spend", r"Spend \1 $0 .*")
+    assert node["projections"][0] == _measure_projection(r"Spend \1 $0 .*")
