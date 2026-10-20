@@ -266,6 +266,23 @@
 - BUGFIX (kept): the picker-literal registry normalises the table
   qualifier (`'Stores'[Region]` and `Stores[Region]` register the same row),
   and inherited fingerprints match non-ASCII text.
+- `style` over a folder of reports (without `--model`) skips a report whose
+  model cannot be resolved or loaded, or whose model styles no measure, with
+  a `Skipped:` line, and counts it in the closing totals; the other reports
+  are styled and decide the exit code. A single report or `--model` keeps
+  the fatal error.
+- `style --table` and `[tables] field_parameters` accept shell-style
+  patterns (`x-*`), matched case-insensitively against the model's tables;
+  a pattern that matches nothing is not an error by itself.
+- `style` prints, per styled visual, the `dataPoint` and `labels` entry
+  counts before and after and the column-side measures left unstyled, and
+  ends with the number of rebinds and skipped reports.
+- `style --seed-label-transparency N` (`[style] label_transparency_seed`)
+  seeds a label background transparency only where a measure has none.
+- `style` merges duplicate metadata entries of a styled measure from the
+  last occurrence (it kept the first).
+- `style` accepts a page folder or a `visual.json`: it finds the enclosing
+  report and restyles only the visuals under that path.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

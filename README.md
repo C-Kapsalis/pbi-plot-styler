@@ -154,17 +154,27 @@ pbi-plot-styler "Roastery.Report"
 ```
 Model:    .../Roastery.SemanticModel
 Measures: 5 drive the styling
-  styled definition/pages/monthlyperformance/visuals/combo01/visual.json
-  styled definition/pages/seasonaltrends/visuals/combo02/visual.json
+  styled definition/pages/monthlyperformance/visuals/combo01/visual.json: dataPoint 0 -> 5, labels 0 -> 6
+  styled definition/pages/seasonaltrends/visuals/combo02/visual.json: dataPoint 0 -> 5, labels 0 -> 6
 
 Restyled 2/2 visual(s); 0 already styled.
+Totals: 0 rebind(s), 0 skipped.
 ```
+
+Each styled line gives the entry counts before and after and, with
+`--exclude-role`, the column-side measures left unstyled.
 
 Run it again and it reports `Restyled 0/2 visual(s); 2 already styled`, the
 command is safe to run after every model change, mechanically.
 
 `REPORT_DIR` can also be any folder that contains one or more `*.Report`
 folders, at any depth: every report found is styled against its own model.
+In such a sweep (without `--model`), a report whose model cannot be resolved
+or loaded, or whose model styles no measure, is skipped with a `Skipped:`
+line and counted in the totals; the other reports are styled as usual. A
+single named report, or a run with `--model`, still stops with exit `2`.
+`REPORT_DIR` may also be a page folder or a `visual.json` inside a report:
+only the visuals under that path are restyled.
 
 ```bash
 pbi-plot-styler path/to/workspace --dry-run
@@ -208,7 +218,7 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 
 | TOML key | CLI flag | Default | Controls |
 |---|---|---|---|
-| `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling. Restrict this to just the table that feeds your line to style only the line; if that table's measure catalog overlaps with the columns' table, also set `exclude_current_roles` below. |
+| `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling. A shell-style pattern such as `x-*` matches the model's tables case-insensitively; one that matches nothing adds nothing. Restrict this to just the table that feeds your line to style only the line; if that table's measure catalog overlaps with the columns' table, also set `exclude_current_roles` below. |
 | `tables.renames` | `--rename-table OLD=NEW` (repeatable) | none | Renames one table in the list above, leaving the other default names in place |
 | `targets.visual_types` | `--visual-type` (repeatable) | `lineClusteredColumnComboChart`, `lineStackedColumnComboChart` | Which `visualType` values get restyled |
 | `targets.exclude_current_roles` | `--exclude-role NAME` (repeatable) | none | Query role (for example `Y`, Power BI's internal name for the columns) whose measures are excluded from styling, per visual: the measure bound to it, or, when the role is bound through a field parameter, every measure that parameter offers. Their existing formatting is kept. Re-reads the binding on every run. |
@@ -220,6 +230,7 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 | `style.label_color` | `--label-color` | `#252423` | Data-label text color |
 | `style.label_background` | `--label-background` | match line color | Data-label background per measure |
 | `style.label_transparency` | `--label-transparency` | `20` | Background transparency, 0 to 100. Seeded where a measure has none; enforced everywhere when set explicitly |
+| `style.label_transparency_seed` | `--seed-label-transparency` | unset | A transparency, 0 to 100, seeded only where a measure has none (never overwrites); cannot be combined with an explicit `label_transparency` |
 | `style.show_labels` | `--show-labels` / `--hide-labels` | `true` | Data labels on/off. Seeded on visuals without label settings; enforced when set explicitly (likewise `label_color`) |
 | `style.label_default_properties` | - | `show`, `color`, `enableBackground` | The properties of the no-selector `labels` entry seeded on a visual that has none, as `name = "DAX literal"` pairs, for example `{enableTitleDataLabel = "true", titleContentType = "'Custom'", enableBackground = "true"}` |
 | `style.touch_existing_label_default` | - | `true` | `false` keeps an existing no-selector `labels` entry exactly as found (no `enableBackground` forced on) |

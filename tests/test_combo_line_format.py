@@ -6,8 +6,8 @@ a stale line projection ('#Report Measures'[!Cost], renamed to Cost in the
 model) and a column-side measure (Clicks on Y), and expects exit 0 and a
 second run that changes nothing.
 
-The x-axis field-parameter tables are listed explicitly rather than matched
-by a name pattern; the styler's default trio is not used here.
+The x-axis field-parameter tables are matched by the name pattern ``x-*``;
+the styler's default trio is not used here.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import pytest
 from cli_helpers import report_context, run, universal  # noqa: F401
 
 REFERENCE_OPTIONS = ["--rebind-stale-line", "--theme-color-id", "9", "--theme-color-percent", "0",
-          "--table", "x-Selector 1", "--table", "x-Plot Specific 1", "--table", "x-Plot Specific 2"]
+                     "--table", "x-*"]
 
 
 def _combo(client):

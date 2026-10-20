@@ -185,9 +185,10 @@ def _rebuild_card(
     ``owned_entries`` exactly as found in the input."""
     defaults, metadata, other = _split(existing or [])
     excluded_entries = [e for e in metadata if _metadata_of(e) in excluded]
+    # duplicates of one key collapse into one entry, merged from the last
     previous: dict[str, dict] = {}
     for entry in metadata:
-        previous.setdefault(_metadata_of(entry), entry)
+        previous[_metadata_of(entry)] = entry
     owned = [build_entry(key, previous.get(key)) for key in styled]
     return defaults, excluded_entries, owned, other
 
@@ -239,6 +240,9 @@ def restyle_visual(
     objects["dataPoint"] = dp_defaults + dp_excluded + dp_owned + dp_other
 
     enforce_transparency = "label_transparency" in config.explicit
+    transparency = (config.label_transparency if enforce_transparency
+                    or config.label_transparency_seed is None
+                    else config.label_transparency_seed)
     lb_defaults, lb_excluded, lb_owned, lb_other = _rebuild_card(
         original.get("labels"),
         styled,
@@ -246,7 +250,7 @@ def restyle_visual(
         lambda key, prev: labels_entry(
             key,
             config.label_background_for(key, slot(key)),
-            config.label_transparency,
+            transparency,
             prev,
             enforce_transparency=enforce_transparency,
         ),
@@ -517,6 +521,14 @@ def iter_visual_files(report_dir: Path) -> Iterator[Path]:
     yield from sorted(pages_dir.rglob("visual.json"))
 
 
+def enclosing_report(path: Path) -> Path | None:
+    """The ``*.Report`` folder a page folder or visual file belongs to."""
+    for parent in [path, *path.parents]:
+        if parent.is_dir() and is_report_dir(parent) and parent != path:
+            return parent
+    return None
+
+
 @dataclass(frozen=True)
 class VisualChange:
     """One visual.json rewrite the styler plans to make."""
@@ -526,6 +538,10 @@ class VisualChange:
     new_text: str
     rebinds: tuple[Rebind, ...] = ()
     bom: bool = False
+    #: column-side measures left out of styling on this visual.
+    excluded: tuple[str, ...] = ()
+    #: per card: (entries before, entries after).
+    counts: tuple[tuple[str, int, int], ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -567,6 +583,7 @@ def plan_changes(
     catalogs: Mapping[str, list[str]] | None = None,
     slots: Mapping[str, int] | None = None,
     model: SemanticModel | None = None,
+    within: Path | None = None,
 ) -> list[VisualChange]:
     """Compute the rewrite for every targeted visual (changed or not).
 
@@ -582,6 +599,8 @@ def plan_changes(
         roles = (config.column_role,)
     changes: list[VisualChange] = []
     for visual_file in iter_visual_files(report_dir):
+        if within is not None and visual_file != within and within not in visual_file.parents:
+            continue
         # Read raw bytes so change detection is byte-accurate (no newline
         # translation on Windows).
         raw = visual_file.read_bytes()
@@ -611,9 +630,15 @@ def plan_changes(
                 trailing_newline=old_text.endswith("\n"),
                 newline="\r\n" if "\r\n" in old_text else "\n",
             )
+        before_objects = (data.get("visual") or {}).get("objects") or {}
+        after_objects = (new_data.get("visual") or {}).get("objects") or {}
+        counts = tuple((card, len(before_objects.get(card) or []),
+                        len(after_objects.get(card) or [])) for card in ("dataPoint", "labels"))
         changes.append(
             VisualChange(path=visual_file, old_text=old_text, new_text=new_text,
-                         rebinds=tuple(rebinds), bom=raw.startswith(BOM))
+                         rebinds=tuple(rebinds), bom=raw.startswith(BOM),
+                         excluded=tuple(sorted(excluded & set(measure_keys))),
+                         counts=counts)
         )
     return changes
 

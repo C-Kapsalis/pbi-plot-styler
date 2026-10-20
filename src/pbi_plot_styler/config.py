@@ -91,6 +91,9 @@ class StylerConfig:
     label_background: str | None = None
     #: Data-label background transparency, 0-100.
     label_transparency: int = DEFAULT_LABEL_TRANSPARENCY
+    #: Transparency seeded only where a measure has none (never overwrites);
+    #: ``None`` seeds ``label_transparency``.
+    label_transparency_seed: int | None = None
     #: Whether data labels are switched on.
     show_labels: bool = True
     #: Theme ``dataColors`` slot used instead of ``line_color`` when set.
@@ -169,6 +172,21 @@ class StylerConfig:
                 )
         if not isinstance(self.touch_existing_label_default, bool):
             raise ConfigError("touch_existing_label_default must be true or false.")
+        if self.label_transparency_seed is not None:
+            if "label_transparency" in self.explicit:
+                raise ConfigError(
+                    "label_transparency and label_transparency_seed are both set. "
+                    "Use label_transparency to enforce a value everywhere, or "
+                    "label_transparency_seed to fill in only missing values."
+                )
+            if isinstance(self.label_transparency_seed, bool) or not isinstance(
+                self.label_transparency_seed, int
+            ) or not 0 <= self.label_transparency_seed <= 100:
+                raise ConfigError(
+                    f"label_transparency_seed is set to "
+                    f"{self.label_transparency_seed!r}, which is out of range. Use "
+                    f"an integer between 0 (opaque) and 100 (fully transparent)."
+                )
         if not isinstance(self.label_transparency, int) or not (
             0 <= self.label_transparency <= 100
         ):
@@ -226,6 +244,7 @@ _KNOWN_STYLE_KEYS = {
     "label_color",
     "label_background",
     "label_transparency",
+    "label_transparency_seed",
     "show_labels",
     "theme_color_id",
     "theme_color_percent",
@@ -329,6 +348,7 @@ def load_config_file(path: Path) -> dict[str, Any]:
         "label_color",
         "label_background",
         "label_transparency",
+        "label_transparency_seed",
         "show_labels",
         "theme_color_id",
         "theme_color_percent",

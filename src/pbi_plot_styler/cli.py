@@ -34,6 +34,8 @@ from .report import (
     VisualChange,
     apply_changes,
     discover_reports,
+    enclosing_report,
+    is_report_dir,
     plan_changes,
     report_model_name,
     resolve_model_dir,
@@ -124,7 +126,7 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
 @main.command(DEFAULT_COMMAND)
 @click.argument(
     "report_dir",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=click.Path(exists=True, path_type=Path),
 )
 @click.option(
     "--model",
@@ -145,8 +147,10 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
     "--table",
     "tables",
     multiple=True,
-    help="Field-parameter table name (repeatable). Overrides the default "
-    "'x-Plot Specific 1' / 'x-Plot Specific 2' / 'y-Plot Specific' trio.",
+    help="Field-parameter table name or shell-style pattern such as 'x-*' "
+    "(repeatable; patterns match the model's tables case-insensitively). "
+    "Overrides the default 'x-Plot Specific 1' / 'x-Plot Specific 2' / "
+    "'y-Plot Specific' trio.",
 )
 @click.option(
     "--rename-table",
@@ -227,6 +231,14 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
     "only where a measure has none; set it to enforce it everywhere.",
 )
 @click.option(
+    "--seed-label-transparency",
+    "label_transparency_seed",
+    type=int,
+    default=None,
+    help="Seed this data-label background transparency (0-100) where a "
+    "measure has none, never overwriting an existing value.",
+)
+@click.option(
     "--show-labels/--hide-labels",
     "show_labels",
     default=None,
@@ -274,6 +286,7 @@ def style(
     label_color: str | None,
     label_background: str | None,
     label_transparency: int | None,
+    label_transparency_seed: int | None,
     show_labels: bool | None,
     rebind_stale_line: bool | None,
     dry_run: bool,
@@ -282,7 +295,8 @@ def style(
     """Style every combo chart in REPORT_DIR from its field parameters.
 
     REPORT_DIR is a PBIP *.Report folder, or any folder containing one or
-    more of them (searched recursively). Reads the measures declared in
+    more of them (searched recursively), or a page folder or visual.json
+    inside a report (only the visuals under it are restyled). Reads the measures declared in
     each report's semantic-model field-parameter tables and rebuilds each
     targeted visual's series colors, data labels, and label backgrounds,
     deterministically and idempotently, keeping every other formatting
@@ -321,17 +335,38 @@ def style(
             label_color=label_color,
             label_background=label_background,
             label_transparency=label_transparency,
+            label_transparency_seed=label_transparency_seed,
             show_labels=show_labels,
             rebind_stale_line=rebind_stale_line,
         )
     except ConfigError as exc:
         raise StylerError(str(exc)) from exc
 
+    within: Path | None = None
+    if report_dir.is_file() or not is_report_dir(report_dir) and enclosing_report(report_dir):
+        # a page folder or a visual file: restyle only what lies under it
+        enclosing = enclosing_report(report_dir)
+        if enclosing is None:
+            raise StylerError(
+                f"{report_dir} is not inside a *.Report folder. Pass a report "
+                f"folder, a folder of reports, a page folder or a visual.json.")
+        within, report_dir = report_dir.resolve(), enclosing
     discovery = _discover(report_dir)
     root = report_dir
     models: dict[Path, SemanticModel] = {}
     changes: list[VisualChange] = []
     all_keys: set[str] = set()
+    # In a sweep of several reports with no --model, a report that cannot be
+    # paired with a model (or whose model styles nothing) is skipped; a
+    # single named report keeps the fatal error.
+    lenient = not discovery.single and model_dir is None
+    skipped_reports: list[tuple[Path, str]] = []
+
+    def skip_or_fail(report: Path, reason: str) -> None:
+        if not lenient:
+            raise StylerError(reason)
+        skipped_reports.append((report, reason))
+        click.echo(f"Skipped:  {report.relative_to(root).as_posix()} ({reason})")
 
     for report in discovery.reports:
         if not discovery.single:
@@ -341,14 +376,14 @@ def style(
             if resolved_model not in models:
                 models[resolved_model] = SemanticModel.load(resolved_model)
             model = models[resolved_model]
-            measure_keys = model.field_parameter_measures(
-                config.field_parameter_tables
-            )
-        except (FileNotFoundError, LookupError) as exc:
-            raise StylerError(str(exc)) from exc
+            tables = _expand_tables(config.field_parameter_tables, model)
+            measure_keys = model.field_parameter_measures(tables) if tables else []
+        except (FileNotFoundError, LookupError, OSError, ValueError) as exc:
+            skip_or_fail(report, str(exc))
+            continue
 
         if not measure_keys:
-            raise StylerError(
+            skip_or_fail(report,
                 f"no measures resolved from field-parameter tables "
                 f"{list(config.field_parameter_tables)} in {resolved_model}, "
                 f"so there is nothing to style. The tables exist, but none "
@@ -356,11 +391,14 @@ def style(
                 f"model. Check that the configured tables reference "
                 f"measures, not only columns."
             )
+            continue
         all_keys.update(k.lower() for k in measure_keys)
 
         click.echo(f"Model:    {resolved_model}")
         click.echo(f"Measures: {len(measure_keys)} drive the styling")
 
+        # every field parameter of the model can bind an excluded role
+        # (v1.1.0 behaviour), not only the configured or matched tables
         catalogs = {
             table: [e.key for e in model.parameter_catalog(table)]
             for table in model.raw_by_table
@@ -372,8 +410,9 @@ def style(
                     measure_keys,
                     config,
                     catalogs={t: k for t, k in catalogs.items() if k},
-                    slots=model.palette_slots(config.field_parameter_tables),
+                    slots=model.palette_slots(tables),
                     model=model,
+                    within=within,
                 )
             )
         except FileNotFoundError as exc:
@@ -408,23 +447,29 @@ def style(
                 f"  {verb} {change.path.relative_to(root).as_posix()}: "
                 f"{rb.entity}[{rb.old}] -> [{rb.new}]"
             )
+    rebinds = sum(len(c.rebinds) for c in changes)
+    totals = f"{rebinds} rebind(s), {len(skipped_reports)} skipped"
     if dry_run:
         for change in pending:
             click.echo()
             click.echo(change.unified_diff(root), nl=False)
+        for change in pending:
+            click.echo(_visual_detail(change, root, "would style"))
         click.echo(
             f"\n{len(pending)}/{len(changes)} visual(s) would change."
             if pending
             else f"\nAll {len(changes)} visual(s) already styled."
         )
+        click.echo(f"Totals: {totals}.")
     else:
         written = apply_changes(changes)
         for change in pending:
-            click.echo(f"  styled {change.path.relative_to(root).as_posix()}")
+            click.echo(_visual_detail(change, root, "styled"))
         click.echo(
             f"\nRestyled {written}/{len(changes)} visual(s); "
             f"{len(changes) - written} already styled."
         )
+        click.echo(f"Totals: {totals}.")
 
     if zip_path is not None:
         write_zip(discovery.reports, changes, zip_path, base=root.parent)
@@ -432,6 +477,33 @@ def style(
 
     if dry_run and pending:
         sys.exit(EXIT_DRIFT)
+
+
+def _expand_tables(names: tuple[str, ...], model: SemanticModel) -> tuple[str, ...]:
+    """Field-parameter table names with each shell-style pattern expanded.
+
+    A pattern matches the model's tables case-insensitively (in name order);
+    one that matches nothing adds nothing. Plain names are kept as given.
+    """
+    import fnmatch
+
+    out: list[str] = []
+    for name in names:
+        if any(ch in name for ch in "*?["):
+            matched = sorted(t for t in model.raw_by_table
+                             if fnmatch.fnmatchcase(t.lower(), name.lower()))
+        else:
+            matched = [name]
+        out += [t for t in matched if t not in out]
+    return tuple(out)
+
+
+def _visual_detail(change: VisualChange, root: Path, verb: str) -> str:
+    counts = ", ".join(f"{card} {before} -> {after}" for card, before, after in change.counts)
+    line = f"  {verb} {change.path.relative_to(root).as_posix()}: {counts}"
+    if change.excluded:
+        line += f"; column side, not styled: {', '.join(change.excluded)}"
+    return line
 
 
 # -- check ---------------------------------------------------------------------
