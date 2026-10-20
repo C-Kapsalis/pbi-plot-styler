@@ -38,8 +38,8 @@ def lit(text: str) -> dict:
 
 
 def quoted(text: str) -> str:
-    """DAX string-literal text: ``'text'``."""
-    return "'" + text + "'"
+    """DAX string-literal text: ``'text'``, inner apostrophes doubled."""
+    return "'" + text.replace("'", "''") + "'"
 
 
 def prop_literal(text: str) -> dict:

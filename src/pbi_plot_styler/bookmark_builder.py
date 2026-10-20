@@ -107,7 +107,15 @@ def _ref(kind: str, table: str, column: str) -> dict:
 
 
 def _pick_literal(pick: dict) -> str:
-    return f"'''{pick['table']}''[{pick['column']}]'"
+    """The saved selection of a field-parameter row, both quoting levels escaped.
+
+    Same spelling as :func:`~pbi_plot_styler.rename.literal_name`: an
+    apostrophe is written four times and a closing bracket twice.
+    """
+    from .rename import literal_name
+
+    table = pick["table"].replace("'", "'" * 4)
+    return "'''" + table + "''[" + literal_name(pick["column"]) + "]'"
 
 
 def _pick_key(pick: dict) -> tuple[str, str]:

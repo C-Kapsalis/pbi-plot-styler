@@ -38,7 +38,7 @@ def _problem(data: Any, cfg: FormatSelectorSection) -> str | None:
     if len(targeting) > 1:
         return f"{len(targeting) - 1} duplicate filter(s) on {cfg.table}[{cfg.column}]"
     only = targeting[0]
-    want = f"'{cfg.item}'"
+    want = _wanted(cfg.item)
     got = _selected(only)
     if got != want:
         return f"the filter selects {got!r} instead of {want}"
@@ -47,6 +47,11 @@ def _problem(data: Any, cfg: FormatSelectorSection) -> str | None:
     if not only.get("isLockedInViewMode"):
         return "the filter is not locked in view mode"
     return None
+
+
+def _wanted(item: str) -> str:
+    """The literal text of a filter that selects ``item``."""
+    return qx.quoted(item)
 
 
 def _active(ctx: RuleContext) -> bool:
