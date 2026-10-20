@@ -36,8 +36,7 @@ def _filter_tables_in(path: Path, tables: tuple[str, ...]) -> set[str]:
 
 
 def _master_candidate(visuals: dict[str, Visual], tables: tuple[str, ...]) -> Visual | None:
-    coverage: dict[str, set[str]] = {}
-    depth: dict[str, int] = {}
+    tables_under: dict[str, set[str]] = {}
 
     def chain(start: Visual) -> list[str]:
         seen: list[str] = []
@@ -54,24 +53,30 @@ def _master_candidate(visuals: dict[str, Visual], tables: tuple[str, ...]) -> Vi
         if not found:
             continue
         for ancestor in chain(visual):
-            coverage.setdefault(ancestor, set()).update(found)
-    for name in coverage:
-        depth[name] = len(chain(visuals[name]))
+            tables_under.setdefault(ancestor, set()).update(found)
 
     def eligible(name: str) -> bool:
         group = visuals[name]
         display = dig(group.data, "visualGroup", "displayName")
         return (
-            len(coverage[name]) >= 2
+            len(tables_under[name]) >= 2
             and group.data.get("isHidden") is not True
             and not (isinstance(display, str) and display.startswith("_"))
         )
 
-    ranked = sorted(
-        (name for name in coverage if eligible(name)),
-        key=lambda n: (-len(coverage[n]), -depth[n], n),
-    )
-    return visuals[ranked[0]] if ranked else None
+    def rank(name: str) -> tuple[int, int, str]:
+        # most filter tables first, then the most deeply nested group; the
+        # name breaks ties, smallest first (hence the negated string order)
+        return len(tables_under[name]), len(chain(visuals[name])), _reverse_order(name)
+
+    candidates = [name for name in tables_under if eligible(name)]
+    best = max(candidates, key=rank, default=None)
+    return visuals[best] if best is not None else None
+
+
+def _reverse_order(name: str) -> tuple[int, ...]:
+    """A key under which ``max`` prefers the alphabetically smallest name."""
+    return tuple(-ord(ch) for ch in name) + (1,)
 
 
 def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:

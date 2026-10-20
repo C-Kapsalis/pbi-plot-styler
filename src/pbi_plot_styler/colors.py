@@ -21,7 +21,7 @@ import copy
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from . import qx
 from .canvas import Bookmark, dig, load_bookmarks, read_json
@@ -106,7 +106,8 @@ def parse_palette(model: SemanticModel, measure: str, host: str) -> Palette:
     slots = {int(n): colour.lower() for n, colour in _SLOT.findall(body)}
     if modulus <= 0 or len(slots) != modulus:
         raise PaletteError(
-            f"[{measure}] declares {len(slots)} colour slot(s) for modulus {modulus}"
+            f"[{measure}]: MOD cycles through {modulus} slot(s) but the SWITCH "
+            f"lists {len(slots)} colour(s); give exactly one colour per slot"
         )
     missing = [n for n in range(base, base + modulus) if n not in slots]
     if missing:
@@ -201,16 +202,20 @@ def _visuals(report: Path) -> Iterable[tuple[Path, dict]]:
             yield path, data
 
 
-def _uses_picker(data: dict, picker: str) -> bool:
-    state = dig(data, "visual", "query", "queryState") or {}
-    for block in state.values() if isinstance(state, dict) else []:
-        for param in dig(block, "fieldParameters") or []:
-            if dig(param, "parameterExpr", "Column", "Expression", "SourceRef", "Entity") == picker:
-                return True
-        for projection in dig(block, "projections") or []:
-            if dig(projection, "field", "Column", "Expression", "SourceRef", "Entity") == picker:
-                return True
-    return False
+def _bound_entities(visual: dict) -> Iterator[str]:
+    """Every table a visual's query roles bind, through a column or a parameter."""
+    roles = dig(visual, "visual", "query", "queryState")
+    if not isinstance(roles, dict):
+        return
+    for role in roles.values():
+        for param in dig(role, "fieldParameters") or []:
+            yield dig(param, "parameterExpr", "Column", "Expression", "SourceRef", "Entity")
+        for projection in dig(role, "projections") or []:
+            yield dig(projection, "field", "Column", "Expression", "SourceRef", "Entity")
+
+
+def _binds_table(visual: dict, table: str) -> bool:
+    return table in _bound_entities(visual)
 
 
 def _bookmark_needs(
@@ -253,7 +258,7 @@ def _targets(report_dir: Path, registry: dict[str, int], palette: Palette,
     for path, data in _visuals(report_dir):
         vtype = dig(data, "visual", "visualType")
         vid = data.get("name") if isinstance(data.get("name"), str) else path.parent.name
-        uses = _uses_picker(data, palette.picker)
+        uses = _binds_table(data, palette.picker)
         supported = vtype in opts.visual_types and (vtype in BAR_TYPES or vtype in TABLE_TYPES)
         if uses and not supported:
             report.notes.append(f"{vid}: {vtype} uses {palette.picker!r} but is not supported")

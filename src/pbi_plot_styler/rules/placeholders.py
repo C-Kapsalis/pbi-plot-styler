@@ -92,42 +92,40 @@ def _hits_in_bookmark(judge: _Judge, path: Path, data: Any) -> Iterator[_Hit]:
     sections = dig(data, "explorationState", "sections")
     for page_id, section in (sections or {}).items() if isinstance(sections, dict) else []:
         containers = dig(section, "visualContainers")
-        for cid, container in (containers or {}).items() if isinstance(containers, dict) else []:
-            single = dig(container, "singleVisual")
-            if not isinstance(single, dict):
+        for container_id, container in (containers or {}).items() if isinstance(containers, dict) else []:
+            state = dig(container, "singleVisual")
+            if not isinstance(state, dict):
                 continue
-            params = single.get("parameters") if isinstance(single.get("parameters"), dict) else {}
-            projections = single.get("projections") if isinstance(single.get("projections"), dict) else {}
+            params = state.get("parameters") if isinstance(state.get("parameters"), dict) else {}
+            projections = state.get("projections") if isinstance(state.get("projections"), dict) else {}
             for group in ("projections", "activeProjections"):
-                roles = single.get(group)
-                for role, exprs in (roles or {}).items() if isinstance(roles, dict) else []:
+                roles = state.get(group)
+                for role, bound in (roles or {}).items() if isinstance(roles, dict) else []:
                     axes = judge.axes_of(params.get(role))
                     if not axes:
                         continue
-                    for expr in exprs or []:
+                    for expr in bound or []:
                         column = dig(expr, "Column")
                         if not judge.is_placeholder(column):
                             continue
                         wanted, note = judge.wanted(axes)
-                        where = f"{page_id}/{cid}/{group}.{role}"
+                        where = f"{page_id}/{container_id}/{group}.{role}"
                         if note:
                             judge.ctx.skip(f"stale-placeholders: {where}: {note}")
                         elif column.get("Property") != wanted:
                             yield _Hit(path, where, column, expr, column.get("Property"), wanted)
-            axes = [a for role in projections for a in judge.axes_of(params.get(role))]
-            if not axes:
-                continue
-            wanted, _note = judge.wanted(axes)
+            all_axes = [a for role in projections for a in judge.axes_of(params.get(role))]
+            wanted = judge.wanted(all_axes)[0] if all_axes else None
             if wanted is None:
                 continue
             extras = [(f.get("expression"), "filters") for f in dig(container, "filters", "byExpr") or []
                       if isinstance(f, dict)]
-            extras += [(o.get("Expression"), "orderBy") for o in single.get("orderBy") or []
+            extras += [(o.get("Expression"), "orderBy") for o in state.get("orderBy") or []
                        if isinstance(o, dict)]
-            for holder, label in extras:
-                column = dig(holder, "Column")
+            for node, origin in extras:
+                column = dig(node, "Column")
                 if judge.is_placeholder(column) and column.get("Property") != wanted:
-                    yield _Hit(path, f"{page_id}/{cid}/{label}", column, holder,
+                    yield _Hit(path, f"{page_id}/{container_id}/{origin}", column, node,
                                column.get("Property"), wanted)
 
 

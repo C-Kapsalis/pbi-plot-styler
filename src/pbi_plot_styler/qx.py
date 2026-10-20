@@ -7,8 +7,6 @@ that write the same gate produce the same bytes.
 """
 from __future__ import annotations
 
-from typing import Any
-
 
 def source(entity: str | None = None, *, alias: str | None = None) -> dict:
     """``{"SourceRef": {...}}`` naming an entity, or a ``From`` alias."""
@@ -18,10 +16,7 @@ def source(entity: str | None = None, *, alias: str | None = None) -> dict:
 
 def field_ref(kind: str, prop: str, entity: str | None = None, *, alias: str | None = None) -> dict:
     """A ``Column`` / ``Measure`` reference: ``{kind: {Expression, Property}}``."""
-    body: dict[str, Any] = {}
-    body["Expression"] = source(entity, alias=alias)
-    body["Property"] = prop
-    return {kind: body}
+    return {kind: {"Expression": source(entity, alias=alias), "Property": prop}}
 
 
 def column(entity: str, prop: str) -> dict:
@@ -34,7 +29,7 @@ def measure(entity: str, prop: str) -> dict:
 
 def lit(text: str) -> dict:
     """``{"Literal": {"Value": text}}`` (``text`` is DAX literal text)."""
-    return {"Literal": dict(Value=text)}
+    return {"Literal": {"Value": text}}
 
 
 def quoted(text: str) -> str:
@@ -49,7 +44,7 @@ def prop_literal(text: str) -> dict:
 
 def solid(expr: dict) -> dict:
     """A colour property: ``{"solid": {"color": {"expr": expr}}}``."""
-    return {"solid": dict(color=dict(expr=expr))}
+    return {"solid": {"color": {"expr": expr}}}
 
 
 def hex_colour(colour: str) -> dict:
@@ -57,32 +52,29 @@ def hex_colour(colour: str) -> dict:
 
 
 def theme_colour(color_id: int, percent: float | int = 0) -> dict:
-    return solid({"ThemeDataColor": dict(ColorId=color_id, Percent=percent)})
+    return solid({"ThemeDataColor": {"ColorId": color_id, "Percent": percent}})
 
 
 def from_entry(alias: str, entity: str) -> dict:
-    return dict(Name=alias, Entity=entity, Type=0)
+    return {"Name": alias, "Entity": entity, "Type": 0}
 
 
 def filter_body(alias: str, entity: str, condition: dict) -> dict:
     """A Version 2 filter over one aliased entity with one condition."""
-    body: dict[str, Any] = {"Version": 2}
-    body["From"] = [from_entry(alias, entity)]
-    body["Where"] = [{"Condition": condition}]
-    return body
+    return {
+        "Version": 2,
+        "From": [from_entry(alias, entity)],
+        "Where": [{"Condition": condition}],
+    }
 
 
 def comparison(kind: int, left: dict, right: dict) -> dict:
-    inner: dict[str, Any] = {"ComparisonKind": kind}
-    inner["Left"] = left
-    inner["Right"] = right
-    return {"Comparison": inner}
+    return {"Comparison": {"ComparisonKind": kind, "Left": left, "Right": right}}
 
 
 def in_values(expression: dict, values: list[str]) -> dict:
     """An ``In`` condition: one expression, one literal per row."""
-    rows = [[lit(v)] for v in values]
-    return {"In": dict(Expressions=[expression], Values=rows)}
+    return {"In": {"Expressions": [expression], "Values": [[lit(v)] for v in values]}}
 
 
 def alias_of(entity: str, fallback: str = "t") -> str:

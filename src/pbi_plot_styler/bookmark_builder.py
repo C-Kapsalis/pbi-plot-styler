@@ -126,6 +126,11 @@ def _pick_literal(pick: dict) -> str:
     return "'''" + table + "''[" + literal_name(pick["column"]) + "]'"
 
 
+def _as_list(value: Any) -> list:
+    """One string as a one-item list; any other value as a list (None: [])."""
+    return [value] if isinstance(value, str) else list(value or [])
+
+
 def _pick_key(pick: dict) -> tuple[str, str]:
     return pick["table"], pick["column"]
 
@@ -277,15 +282,15 @@ class Builder:
                     single["display"] = {"mode": "hidden"}
                 else:
                     single.pop("display", None)
-        for hidden, key in ((False, "show_groups"), (True, "hide_groups")):
-            ids = entry.get(key) or []
-            if ids:
-                groups = section.setdefault("visualContainerGroups", {})
-                for gid in ids:
-                    groups.setdefault(gid, {})["isHidden"] = hidden
+        group_hidden = {gid: False for gid in _as_list(entry.get("show_groups"))}
+        group_hidden.update({gid: True for gid in _as_list(entry.get("hide_groups"))})
+        if group_hidden:
+            groups = section.setdefault("visualContainerGroups", {})
+            for gid, hidden in group_hidden.items():
+                groups.setdefault(gid, {})["isHidden"] = hidden
 
     def _category(self, display: str, section: dict, value: Any) -> None:
-        values = [value] if isinstance(value, str) else list(value or [])
+        values = _as_list(value)
         column = self.settings.category_column
         for flt in dig(section, "filters", "byExpr") or []:
             if dig(flt, "expression", "Column", "Property") == column:
