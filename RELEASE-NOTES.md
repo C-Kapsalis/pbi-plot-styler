@@ -102,6 +102,17 @@
   The command prints one line naming the tables it uses:
   `Field parameters: <names> (dimension: ...; metric: ...)`, or
   `Field parameters: <names> (explicit)` when the list was given.
+
+  What each command uses:
+  - `style` — the metric parameters for the measures the styling drives, and
+    the whole detected set for the column wells and the excluded roles;
+  - `check` — the detected set, where a rule needs to know which tables are
+    field parameters (the picker registry, the slicer gates); the name
+    patterns remain the fallback when the model could not be read;
+  - `colors` — nothing: it reads the palette measure and its host table by
+    name, not a field parameter;
+  - `bookmarks build` — nothing: it works from the report's own bindings,
+    not from the model's field-parameter tables.
 - **STRICTER: `FPM001` reports more overlaps.** A parameter that claims a
   slot it already claimed is now a finding; each claim is paired with the
   most recent earlier claimant of the slot (a third claimant is paired with

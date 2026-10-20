@@ -412,6 +412,34 @@ class ReportContext:
     model: SemanticModel | None
     findings: list[Finding] = field(default_factory=list)
     extensions: frozenset[str] = frozenset()
+    _parameters: object | None = None
+
+    def field_parameters(self):
+        """The model's field parameters, detected from its TMDL.
+
+        A table is a field parameter when its column carries the parameter
+        metadata and its rows are ``NAMEOF(...)`` tuples; the name is only
+        a hint. When the model could not be loaded the set is empty and
+        the caller falls back to the name patterns.
+        """
+        if self._parameters is None:
+            if self.model is None:
+                self._parameters = ()
+            else:
+                from .fieldparams import detect_field_parameters
+                detected = detect_field_parameters(self.model.raw_by_table,
+                                                   self.model.measures_by_table)
+                self._parameters = detected.names
+        return self._parameters
+
+    def is_field_parameter(self, name: str | None) -> bool:
+        """Is this table one of the model's field parameters?"""
+        if not isinstance(name, str):
+            return False
+        detected = self.field_parameters()
+        if detected:
+            return name in detected
+        return False
 
     def rel(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()

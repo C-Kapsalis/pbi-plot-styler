@@ -444,13 +444,22 @@ class SelectorSlicer:
     tables: tuple[str, ...]
 
 
-def slicer_selector_tables(visual: Visual, settings: Settings) -> list[str]:
-    """Selector tables bound in a slicer's ``Values`` projections."""
+def slicer_selector_tables(visual: Visual, settings: Settings,
+                           parameters: tuple[str, ...] = ()) -> list[str]:
+    """Selector tables bound in a slicer's ``Values`` projections.
+
+    ``parameters`` is the model's detected field parameters; when it is
+    empty the name patterns decide.
+    """
     tables: list[str] = []
     values = visual.query_state.get("Values") or {}
     for projection in values.get("projections") or []:
         entity = source_entity(dig(projection, "field", "Column"))
-        if settings.is_selector_table(entity) and entity not in tables:
+        if parameters:
+            is_selector = entity in parameters
+        else:
+            is_selector = settings.is_selector_table(entity)
+        if is_selector and entity not in tables:
             tables.append(entity)
     return tables
 
@@ -460,6 +469,7 @@ def selector_slicers(
     canvas_only: bool = True,
     settings: Settings | None = None,
     index: ReportIndex | None = None,
+    parameters: tuple[str, ...] = (),
 ) -> list[SelectorSlicer]:
     """Slicer visuals bound to a selector table (canvas pages only by default)."""
     settings = settings or Settings()
@@ -471,7 +481,7 @@ def selector_slicers(
             continue
         if visual.vtype != "slicer":
             continue
-        tables = slicer_selector_tables(visual, settings)
+        tables = slicer_selector_tables(visual, settings, parameters)
         if tables:
             found.append(SelectorSlicer(visual.page_id, visual.folder, visual.path, tuple(tables)))
     return found

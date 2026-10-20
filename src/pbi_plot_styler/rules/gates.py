@@ -161,6 +161,18 @@ class _Capture:
     container: dict
 
 
+def _is_selector(ctx: RuleContext, entity) -> bool:
+    """Is this table one of the model's field parameters?
+
+    The model's own field parameters are detected from its TMDL; the name
+    patterns are the fallback when the model could not be read.
+    """
+    detected = ctx.field_parameters()
+    if detected:
+        return entity in detected
+    return ctx.settings.is_selector_table(entity)
+
+
 def _selector_slicers_on_visible_canvas(ctx: RuleContext, *,
                                        heuristic: bool = True) -> list[Visual]:
     """Selector slicers on visible canvas pages.
@@ -170,6 +182,7 @@ def _selector_slicers_on_visible_canvas(ctx: RuleContext, *,
     never gates those.
     """
     settings = ctx.settings
+    parameters = ctx.field_parameters()
     canvas = set(ctx.index.canvas_page_ids(settings))
     found = []
     for page in ctx.index.pages:
@@ -181,7 +194,7 @@ def _selector_slicers_on_visible_canvas(ctx: RuleContext, *,
             named = heuristic and settings.gates.name_heuristic and all(
                 token in visual.semantic_name.lower() for token in ("slicer", "selector")
             )
-            if slicer_selector_tables(visual, settings) or named:
+            if slicer_selector_tables(visual, settings, parameters) or named:
                 found.append(visual)
     return found
 
@@ -197,7 +210,7 @@ def _bookmark_selector_captures(ctx: RuleContext) -> Iterator[_Capture]:
                     continue
                 values = dig(container, "singleVisual", "activeProjections", "Values") or []
                 entities = [dig(v, "Column", "Expression", "SourceRef", "Entity") for v in values]
-                if any(ctx.settings.is_selector_table(e) for e in entities):
+                if any(_is_selector(ctx, e) for e in entities):
                     yield _Capture(bookmark, page_id, cid, container)
 
 

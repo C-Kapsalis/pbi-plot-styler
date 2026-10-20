@@ -128,7 +128,7 @@ def _resolve_scope(ctx: RuleContext) -> _Scope:
         matches = [
             v.folder for v in main.visuals
             if v.vtype == "slicer"
-            and {e for e in v.query_entities() if ctx.settings.is_selector_table(e)} == {table}
+            and {e for e in v.query_entities() if _is_selector(ctx, e)} == {table}
         ]
         scope.slicer_for[table] = matches[0] if len(matches) == 1 else None
         if len(matches) != 1:
@@ -136,7 +136,7 @@ def _resolve_scope(ctx: RuleContext) -> _Scope:
     scope.selector_slicers = [
         v.folder for v in main.visuals
         if v.vtype == "slicer"
-        and len({e for e in v.query_entities() if ctx.settings.is_selector_table(e)}) == 1
+        and len({e for e in v.query_entities() if _is_selector(ctx, e)}) == 1
     ]
     rows = scope.declared("Rows")
     scope.row_param = rows[0] if rows else None
@@ -146,7 +146,8 @@ def _resolve_scope(ctx: RuleContext) -> _Scope:
         filters = set(ctx.settings.panel.filter_tables)
         scope.row_dropdowns = [
             v.folder for v in main.visuals
-            if v.vtype == "slicer" and filters & set(slicer_selector_tables(v, ctx.settings))
+            if v.vtype == "slicer" and filters & set(
+                    slicer_selector_tables(v, ctx.settings, ctx.field_parameters()))
         ]
     return scope
 
@@ -247,7 +248,9 @@ def _dropdown_span(ctx: RuleContext, scope: _Scope) -> str:
     names = []
     for vid in scope.row_dropdowns:
         visual = visuals.get(vid)
-        tables = slicer_selector_tables(visual, ctx.settings) if visual else []
+        tables = (slicer_selector_tables(visual, ctx.settings,
+                                         ctx.field_parameters())
+                 if visual else [])
         names.append(tables[0] if tables else vid)
     if not names:
         return "the row dropdowns"
@@ -421,12 +424,33 @@ def _check_page_wells(ctx: RuleContext, scope: _Scope) -> None:
 
 
 # -- picker literals ----------------------------------------------------------------
+def _is_selector(ctx: RuleContext, entity: str) -> bool:
+    """Is this table one of the model's field parameters?
+
+    The model's own field parameters are detected from its TMDL; the name
+    patterns are the fallback when the model could not be read.
+    """
+    detected = ctx.field_parameters()
+    if detected:
+        return entity in detected
+    return ctx.settings.is_selector_table(entity)
+
+
 def _registry(ctx: RuleContext) -> dict[str, set[str]]:
-    """selector table -> normalized ``'table'[field]`` rows it offers."""
+    """selector table -> normalized ``'table'[field]`` rows it offers.
+
+    A selector table is one of the model's field parameters (detected from
+    its TMDL); the name patterns are the fallback when the model could not
+    be read.
+    """
     model = ctx.model
     registry: dict[str, set[str]] = {}
+    detected = ctx.field_parameters()
     for table in model.raw_by_table:
-        if not ctx.settings.is_selector_table(table):
+        if detected:
+            if table not in detected:
+                continue
+        elif not ctx.settings.is_selector_table(table):
             continue
         rows: set[str] = set()
         for ref in model.nameof_refs(table):
@@ -444,7 +468,7 @@ def _picker_slicers(ctx: RuleContext) -> dict[str, str]:
     for visual in ctx.index.visuals():
         if visual.vtype != "slicer":
             continue
-        tables = {e for e in visual.query_entities() if ctx.settings.is_selector_table(e)}
+        tables = {e for e in visual.query_entities() if _is_selector(ctx, e)}
         if len(tables) == 1:
             pickers[visual.folder] = next(iter(tables))
     return pickers
