@@ -109,7 +109,7 @@ class AnswerBookmarksSection:
     row_dropdowns: tuple[str, ...] | None = None
     inherited_fingerprints: tuple[str, ...] = ()
     submenu_prefix: str = "Submenu"
-    slot_mode: str = "values-only"
+    slot_mode: str = "all-roles"
     #: accepted-findings file used when the run names no --baseline
     #: (relative to the config file).
     baseline: str | None = None

@@ -88,6 +88,10 @@ class Rule:
     critical: tuple[str, ...] = ()
     #: ids that count toward the rule's --summary row (empty: all ``ids``).
     summary_ids: tuple[str, ...] = ()
+    #: keep findings in the order the rule found them (not sorted by file).
+    ordered: bool = False
+    #: text output: ``(new findings, counts, framing, values) -> lines``.
+    render: Callable[..., list[str]] | None = None
 
     @property
     def summarised(self) -> tuple[str, ...]:
@@ -134,9 +138,10 @@ def _registry() -> dict[str, Rule]:
         Rule("answer-bookmarks", "whole-page answer bookmarks and their page",
              ("ABK000", "ABK001", "ABK003", "ABK004", "ABK005", "ABK006", "ABK007",
               "ABK008", "ABK009", "ABK010", "PGW001", "PGW002", "JSN001"),
-             answers.check_answer_bookmarks),
+             answers.check_answer_bookmarks, ordered=True, render=render_answers),
         Rule("bookmark-literals", "picker literals are rows of their selector",
-             ("BML001", "BML002", "JSN001"), answers.check_bookmark_literals),
+             ("BML001", "BML002", "JSN001"), answers.check_bookmark_literals, ordered=True,
+             render=render_literals),
     ]
     return {rule.slug: rule for rule in rules}
 
@@ -236,3 +241,121 @@ FIX_HINTS = {
 def fix_hint(check_id: str) -> str:
     """Where and how to fix a finding with id ``check_id``."""
     return FIX_HINTS.get(check_id, "see docs/convention-rules.md")
+
+
+# -- text output ---------------------------------------------------------------------
+#: Guidance printed after a run of new findings of one id (text output).
+GUIDANCE: dict[str, tuple[str, ...]] = {
+    "ABK001": (
+        "options.targetVisualNames must be PRESENT and EMPTY ([]).",
+        "A list of visual ids scopes the bookmark to those visuals only, so its",
+        "picker selections, page filter, drill level and group visibility are",
+        "silently ignored on apply — the menu entry looks clickable and does",
+        "nothing. Deleting the key entirely makes it unclickable instead.",
+        "Saving a bookmark in the Power BI Service with a visual selected",
+        "re-narrows this field, so a workspace round-trip can reintroduce it.",
+    ),
+    "ABK007": (
+        "The z-Map page filter is what makes a field analysis-appropriate: it",
+        "narrows the x-/y-Selector pickers to the groups the z-Map declares legal for",
+        "that category. Without it the view is not 'an aspect of a category', and",
+        "the pickers offer fields whose combination produces meaningless numbers.",
+    ),
+    "ABK008": (
+        "A bookmark not registered under its category's Submenu group exists in",
+        "the file tree and is unreachable in the report — no menu entry renders.",
+        "Add its `name` to that group's children in bookmarks.json.",
+    ),
+    "ABK003": (
+        "The matrix is isHidden at page level and belongs to no group, so each",
+        "bookmark's own capture is the only thing that can show it. Visible ==",
+        "captured WITHOUT a display key (the mode enum has no 'visible' member).",
+    ),
+    "ABK004": (
+        "projections are Power BI's persisted RESOLUTION of the field parameters,",
+        "so they must equal what this bookmark's own pickers select. A clone that",
+        "keeps its base's resolution shows the base's fields in every view — the",
+        "{fingerprints} are the fingerprint.",
+    ),
+    "ABK005": (
+        "projections = Rows AND Values; activeProjections = Rows only (the first",
+        "field). Values in activeProjections collapses the matrix to one column.",
+        "expansionStates pin row expansion against specific fields, so inherited",
+        "from a base they point at fields this bookmark does not use.",
+    ),
+    "ABK009": (
+        "The Values well declares SEVERAL field parameters, and",
+        "singleVisual.parameters is the slot map: each parameter owns a contiguous",
+        "range [index, index+length) of projections.Values, whose contents are the",
+        "parameters' selections CONCATENATED in declared order — never",
+        "deduplicated, because a slot belongs to exactly one parameter.",
+        "A pick outside its parameter's range renders NOTHING: the well lists the",
+        "parameter, the slicer shows the selection, the literal validator is green,",
+        "and the matrix simply has no column for it.",
+        "Fix: rebuild projections + parameters from the picker selections (what",
+        "`pbi-plot-styler bookmarks build` does), or distribute the measure set so",
+        "one measure is not selected in two parameters.",
+    ),
+    "ABK010": (
+        "Owner rule: every dimension the matrix breaks rows by must also be",
+        "selected in one of the {dropdowns} dropdown filters, so a reader can",
+        "narrow to a value of it. A breakdown you cannot filter is half a view.",
+        "`pbi-plot-styler bookmarks build` mirrors Rows into the dropdowns automatically.",
+    ),
+    "PGW001": (
+        "A projection in the PAGE definition renders in EVERY bookmark and no",
+        "bookmark can remove it. Fix it in",
+        "definition/pages/<page>/visuals/<visual>/visual.json, not in a bookmark.",
+        "Exception: '{slot_table}' placeholders are the template",
+        "reserving its parameter slots and are expected.",
+    ),
+    "PGW002": (
+        "Deleting or re-emitting a bookmark under a new name leaves the",
+        "navigator's selectedBookmark dangling and the strip renders a dead entry.",
+    ),
+}
+_SLOTS_GUIDANCE = (
+    "Each parameter owns [index, index+length) of the well's projections.",
+    "Where two claim the same slot the LATER declaration wins it, so the",
+    "earlier parameter's picks render in NO bookmark — and because it is page",
+    "level, every bookmark is wrong identically, which reads like a bookmark",
+    "bug and is not one.",
+    "This is NOT a rule that indexes start at 0 and run contiguously: a fixed",
+    "projection may own a slot, as the z_space template visual does.",
+)
+GUIDANCE["FPM001"] = GUIDANCE["FPM002"] = _SLOTS_GUIDANCE
+
+
+def guided_lines(findings: list, framing: Callable[[Any], str],
+                 values: dict[str, str] | None = None) -> list[str]:
+    """Finding lines; a run of one id with guidance gets a header and the guidance."""
+    values = values or {}
+    lines: list[str] = []
+    i = 0
+    while i < len(findings):
+        check_id = findings[i].check_id
+        j = i
+        while j < len(findings) and findings[j].check_id == check_id:
+            j += 1
+        guidance = GUIDANCE.get(check_id)
+        if guidance:
+            lines.append(f"{check_id} — NEW finding(s), not in the baseline:")
+        lines += [framing(f) for f in findings[i:j]]
+        if guidance:
+            lines.append("")
+            lines += [line.format(**values) if "{" in line else line for line in guidance]
+        i = j
+    return lines
+
+
+def render_answers(findings: list, counts: dict, framing, values: dict) -> list[str]:
+    lines = [f"bookmarks tested: {counts.get('answer bookmarks', 0)} | failures: {len(findings)}"]
+    if not findings:
+        lines.append("  all visual-level checks pass (ABK001, ABK003-ABK010, PGW001-PGW002)")
+    return lines + guided_lines(findings, framing, values)
+
+
+def render_literals(findings: list, counts: dict, framing, values: dict) -> list[str]:
+    lines = [f"bookmarks checked: {counts.get('bookmarks checked', 0)} | literals OK: "
+             f"{counts.get('literals OK', 0)} | UNREGISTERED: {counts.get('UNREGISTERED', 0)}"]
+    return lines + [framing(f) for f in findings]

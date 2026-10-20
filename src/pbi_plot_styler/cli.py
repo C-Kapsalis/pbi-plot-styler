@@ -605,8 +605,7 @@ def _filtered_reports(path: Path, report_name: str | None, model_name: str | Non
     "only_names",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="bookmark-literals: check only the bookmarks whose display names "
-    "are listed in this JSON file (a list of strings).",
+    help="bookmark-literals: config json — check only bookmarks it names",
 )
 @click.option(
     "--baseline",
@@ -684,6 +683,11 @@ def check(
     accepted = {k for k in accepted if k[0] not in UNBASELINABLE}
 
     options: dict = {}
+    try:
+        builder = load_builder_settings(config_path)
+        options["picker_labels"] = {vid: key for key, vid in builder.pickers.items()}
+    except BuildError:
+        pass
     if only_names is not None:
         try:
             options["only_display_names"] = load_display_name_filter(only_names)
@@ -752,13 +756,19 @@ def check(
 
     for report in reports:
         ctx = contexts[report]()
+        found: list[Finding] = sorted(model_findings.get(report, []),
+                                      key=lambda f: (f.file, f.check_id, f.subject))
         try:
             for slug in slugs:
+                before = len(ctx.findings)
                 registry[slug].check(ctx)
+                added = ctx.findings[before:]
+                if not registry[slug].ordered:
+                    added = sorted(added, key=lambda f: (f.file, f.check_id, f.subject))
+                found += added
         except RuleError as exc:
             raise StylerError(str(exc)) from exc
-        findings += sorted(model_findings.get(report, []) + ctx.findings,
-                           key=lambda f: (f.file, f.check_id, f.subject))
+        findings += found
         keep_notes(ctx)
         for slug, n in ctx.checked.items():
             checked[slug] = checked.get(slug, 0) + n
@@ -841,14 +851,15 @@ def check(
             click.echo(diff, nl=False)
         for p, r in refused:
             click.echo(f"REFUSED  {p.relative_to(root).as_posix()}: {r}")
-        for f in new:
-            click.echo(f"{f.severity.upper():<8} {f.check_id}  {f.file}: {f.message}")
+        for line in _finding_lines(registry, slugs, new, details, settings):
+            click.echo(line)
+        by_id: dict[str, list[str]] = {}
         for check_id, location in healed:
-            click.echo(f"healed   {check_id}  {location}")
-        if healed:
-            click.echo("hint: run with --update-baseline to lock the improvement in.")
-        for slug, counts in details.items():
-            click.echo(f"checked  {slug}: " + ", ".join(f"{n} {what}" for what, n in counts.items()))
+            by_id.setdefault(check_id, []).append(location)
+        for check_id, locations in by_id.items():
+            click.echo(f"{check_id}: {len(locations)} accepted finding(s) no longer occur — "
+                       f"re-capture the baseline (pbi-plot-styler check --update-baseline) "
+                       f"to lock it in: {sorted(locations)}")
         if compliance is not None:
             click.echo(_compliance_text(compliance, findings))
         errors = sum(f.severity == "error" for f in new)
@@ -871,6 +882,43 @@ def check(
                            f"{guards[0].message}")
 
     sys.exit(exit_code)
+
+
+def _framing(f: Finding) -> str:
+    return f"{f.severity.upper():<8} {f.check_id}  {f.file}: {f.message}"
+
+
+def _finding_lines(registry, slugs, new: list[Finding], details: dict,
+                   settings: Settings) -> list[str]:
+    """The text lines of the new findings, grouped per rule in run order.
+
+    A rule with its own ``render`` adds its header and summary lines; any
+    other rule prints its findings, with guidance for ids that have it.
+    """
+    from .rules import guided_lines
+
+    values = {
+        "fingerprints": ", ".join(settings.answer_bookmarks.inherited_fingerprints)
+        or "inherited fingerprints",
+        "dropdowns": "/".join(settings.panel.filter_tables[:1] + tuple(
+            t.rsplit(" ", 1)[-1] for t in settings.panel.filter_tables[1:])),
+        "slot_table": settings.placeholders.template_slot_table,
+    }
+    owner: dict[int, str] = {}
+    for f in new:
+        for slug in slugs:
+            if f.check_id in registry[slug].ids:
+                owner[id(f)] = slug
+                break
+    lines = [_framing(f) for f in new if id(f) not in owner]
+    for slug in slugs:
+        mine = [f for f in new if owner.get(id(f)) == slug]
+        render = registry[slug].render
+        if render is not None:
+            lines += render(mine, details.get(slug, {}), _framing, values)
+        else:
+            lines += guided_lines(mine, _framing, values)
+    return lines
 
 
 def _load_models(reports, root: Path, model_dir: Path | None, settings: Settings,

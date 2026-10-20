@@ -485,16 +485,11 @@ def _check_field_parameter_slots(ctx: ReportContext, path: Path, data: Any) -> N
             for slot in range(start, start + length):
                 earlier = claimant.get(slot)
                 if earlier is not None:
-                    what = (
-                        f"field parameter {name!r} claims slot {slot} twice"
-                        if earlier == name
-                        else f"field parameters {earlier!r} and {name!r} both "
-                        f"claim slot {slot}"
-                    )
                     ctx.add(
                         "FPM001", path, f"{role}:{earlier}|{name}",
-                        f"{role}: {what}; the later claim wins, so the earlier "
-                        f"picks never render",
+                        f"{path.parent.name}/{role}: parameters {earlier} and {name} both "
+                        f"claim slot {slot} — the later one wins, so {earlier}'s picks "
+                        f"render in NO bookmark",
                         distinct=f"slot{slot}",
                     )
                 # The latest claimant owns the slot, so a third claim is
@@ -503,9 +498,9 @@ def _check_field_parameter_slots(ctx: ReportContext, path: Path, data: Any) -> N
             if length and start + length > len(projections):
                 ctx.add(
                     "FPM002", path, f"{role}:{name}",
-                    f"{role}: field parameter {name!r} claims slots "
-                    f"{start}..{start + length - 1} but the role has only "
-                    f"{len(projections)} projection(s)",
+                    f"{path.parent.name}/{role}: parameter {name} claims slots "
+                    f"{start}..{start + length - 1} but the well carries only "
+                    f"{len(projections)} projections",
                 )
 
 

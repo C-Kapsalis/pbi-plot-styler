@@ -69,7 +69,7 @@ slicers = {"x-Selector 2" = "<visual id>"}  # optional per parameter
 row_dropdowns = ["<visual id>"]           # optional; slicers on panel.filter_tables
 inherited_fingerprints = []
 submenu_prefix = "Submenu"
-slot_mode = "values-only"                 # or "all-roles"
+slot_mode = "all-roles"                   # or "values-only" (Values slots only)
 baseline = "answer-floors.json"           # optional; used without --baseline,
                                           # relative to this file
 ```
@@ -243,8 +243,17 @@ integrity rule's `FPM001` / `FPM002`. A bookmark file or main-page visual that
 does not parse is a `JSN001` error, so the run fails instead of skipping it.
 `ABK000` can never be accepted by a baseline: `--update-baseline` does not
 write it, drops an entry for it, and exits 1 while it occurs. The text output
-ends with what was checked (`checked  answer-bookmarks: N answer bookmarks`);
-`--json` has the same counts under `checked`.
+starts with `bookmarks tested: <n> | failures: <m>` (and, with no new finding,
+`  all visual-level checks pass (ABK001, ABK003-ABK010, PGW001-PGW002)`);
+`--json` has the count under `checked`. Findings are listed per bookmark in
+check order (T1, T3, T4 rows, slot maps, inherited fields, capture shape,
+pickers, dropdowns, category, submenu), then the page-level ones. Each run of
+findings of one id is headed `<ID> — NEW finding(s), not in the baseline:`
+and followed by a blank line and that id's guidance (also for `FPM001` /
+`FPM002`). Messages start with the bare display name, for example
+`<name>: Main Matrix captured as hidden`. `ABK006` names the picker by its
+`[bookmarks] pickers` key when the config file has one. The slot check
+compares the Rows and the Values slots by default (`slot_mode`).
 
 Fix page-level findings (`PGW001`, `PGW002`) first: they reproduce in every
 bookmark, so capture-level findings are only meaningful once the page is
@@ -295,9 +304,11 @@ the active section is checked:
 - `BML002`: the literal is registered in no selector.
 
 `--only-display-names` takes a JSON list of names, or the `bookmarks build`
-entries file (a list of objects with a `displayName`). The text output ends
-with the bookmarks scanned, literals checked and literals resolved (`--json`:
-`checked`). Without a usable paired model the rule cannot judge a report:
+entries file (a list of objects with a `displayName`). The text output starts
+with `bookmarks checked: <n> | literals OK: <ok> | UNREGISTERED: <bad>` (every
+unresolved container literal counts; `--json`: `checked`). There is one finding
+per (bookmark, literal, reason), sorted: `<display name>  ->  <'table'[field]>`
+and, on the next line, the reason. Without a usable paired model the rule cannot judge a report:
 when no report of the run was judged it is a setup error (exit 2) naming
 `--model`; otherwise the report is listed under `skipped`. An unreadable
 bookmark file is a `JSN001` error.
@@ -316,5 +327,6 @@ field on each finding in `--json`).
 
 `--baseline FILE` accepts the findings it lists; only others fail the run.
 Accepted entries of this run's rules and reports that no longer occur are
-listed as `healed`, with a hint that `--update-baseline` locks the
-improvement in; entries of other rules or reports are never called healed.
+listed once per id: `<ID>: <n> accepted finding(s) no longer occur —
+re-capture the baseline (pbi-plot-styler check --update-baseline) to lock it
+in: [<locations>]`; entries of other rules or reports are never called healed.

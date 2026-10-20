@@ -196,7 +196,8 @@ def p3_range(report: Path) -> None:
 #: {IDS key: count}). The p3-two-slot-overlap and p3-same-entity variants
 #: change the declared Values parameters, so T9 also fails for both answer
 #: bookmarks. Counts are one per finding subject; for P3 each overlapping slot
-#: is its own finding (the stricter FPM001 rule).
+#: is its own finding (the stricter FPM001 rule). The slot check compares the
+#: Rows and the Values slots, so t4-rows-mismatch also fails the Rows slot map.
 VARIANTS: dict[str, tuple[Callable[[Path], None], str, dict[str, int]]] = {
     "t1-unscoped": (t1_unscoped, "TestBookmarkLevel::test_t1_targets_all_visuals", {"T1": 1}),
     "t1-missing-key": (t1_missing_key, "TestBookmarkLevel::test_t1_targets_all_visuals", {"T1": 1}),
@@ -204,7 +205,7 @@ VARIANTS: dict[str, tuple[Callable[[Path], None], str, dict[str, int]]] = {
     "t8-unregistered": (t8_unregistered, "TestBookmarkLevel::test_t8_registered_under_a_submenu", {"T8": 1}),
     "t3-hidden": (t3_hidden, "TestVisualCaptureLevel::test_t3_matrix_captured_and_visible", {"T3": 1}),
     "t3-not-captured": (t3_not_captured, "TestVisualCaptureLevel::test_t3_matrix_captured_and_visible", {"T3": 1}),
-    "t4-rows-mismatch": (t4_rows_mismatch, "TestVisualCaptureLevel::test_t4_rows_are_this_bookmarks_own", {"T4": 1}),
+    "t4-rows-mismatch": (t4_rows_mismatch, "TestVisualCaptureLevel::test_t4_rows_are_this_bookmarks_own", {"T4": 1, "T9": 1}),
     "t4-inherited": (t4_inherited, "TestVisualCaptureLevel::test_t4_rows_are_this_bookmarks_own", {"T4": 1}),
     "t5-active-values": (t5_active_values, "TestVisualCaptureLevel::test_t5_matrix_capture_shape", {"T5": 1}),
     "t5-expansion": (t5_expansion, "TestVisualCaptureLevel::test_t5_matrix_capture_shape", {"T5": 1}),

@@ -345,6 +345,21 @@
 - `bookmarks build` always writes `visualContainerGroups` on the built section
   and `projections` / `parameters` on a captured chart (default layout), and an
   empty cached list on a legacy picker it empties.
+- `answer-bookmarks` text output follows the earlier page-state checker: a
+  `bookmarks tested: <n> | failures: <m>` header (and a pass line), findings
+  in check order per bookmark with page-level ones last, a header and a
+  guidance block per run of one id, and its messages (`<name>: Main Matrix not
+  captured (cannot be made visible)`, `<name>: not all-visuals targeting
+  (null)`, the slot-map, dropdown and navigator sentences). `FPM001` /
+  `FPM002` use the same wording (`<visual>/<role>: parameters A and B both
+  claim slot n — ...`). The slot check now compares the Rows and the Values
+  slots by default (`slot_mode = "all-roles"`), so a rows mismatch also
+  reports the Rows slot map.
+- `healed` is one line per id naming the count and the locations, with the
+  `--update-baseline` hint in the same line.
+- `bookmark-literals` prints `bookmarks checked: <n> | literals OK: <ok> |
+  UNREGISTERED: <bad>` first and reports one finding per (bookmark, literal,
+  reason), sorted, with the reason on its own line.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

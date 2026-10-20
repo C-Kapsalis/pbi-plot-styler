@@ -193,19 +193,20 @@ def check_answer_bookmarks(ctx: RuleContext) -> None:
                  "(rows are the bookmark's own) and ABK010 (rows in the dropdowns) "
                  "were not run")
     report_unreadable(ctx, [scope.main.path / "visuals"])
-    _check_page_wells(ctx, scope)
     answers = _answer_bookmarks(ctx)
     ctx.checked["answer-bookmarks"] = len(answers)
     ctx.details["answer-bookmarks"] = {"answer bookmarks": len(answers)}
     if not answers:
         ctx.add("ABK000", ctx.report_dir / "definition" / "bookmarks", "prefixes",
-                f"no bookmark display name starts with any of "
-                f"{', '.join(repr(p) for p in cfg.prefixes)}; the suite would "
-                f"pass without checking anything")
-        return
-    submenu_children = _submenu_children(ctx)
-    for bookmark in answers:
-        _check_bookmark(ctx, scope, bookmark, submenu_children)
+                f"no whole-page category bookmarks matched [answer_bookmarks] prefixes, so "
+                f"every check passed on an empty set. Either the naming convention changed "
+                f"or the report moved. Prefixes currently expected: {list(cfg.prefixes)!r}")
+    else:
+        submenu_children = _submenu_children(ctx)
+        for bookmark in answers:
+            _check_bookmark(ctx, scope, bookmark, submenu_children)
+    # page-level findings come after every bookmark's
+    _check_page_wells(ctx, scope)
 
 
 def report_unreadable(ctx: RuleContext, visual_dirs: list[Path] = ()) -> None:
@@ -235,20 +236,100 @@ def _submenu_children(ctx: RuleContext) -> set[str]:
     return children
 
 
+def _family(parameter: str | None) -> str:
+    """``y-Selector`` for ``y-Selector 2``: the parameter name without its number."""
+    return re.sub(r"\s*\d+$", "", parameter or "") or "y-Selector"
+
+
+def _dropdown_span(ctx: RuleContext, scope: _Scope) -> str:
+    """The row dropdowns' parameters as ``y-Selector 3/4/5/6``."""
+    visuals = {v.folder: v for v in scope.main.visuals}
+    names = []
+    for vid in scope.row_dropdowns:
+        visual = visuals.get(vid)
+        tables = slicer_selector_tables(visual, ctx.settings) if visual else []
+        names.append(tables[0] if tables else vid)
+    if not names:
+        return "the row dropdowns"
+    names = sorted(names)
+    tails = []
+    for name in names[1:]:
+        match = re.search(r"(\d+)$", name)
+        tails.append(match.group(1) if match else name)
+    return "/".join([names[0], *tails])
+
+
+def _picker_label(ctx: RuleContext, vid: str) -> str:
+    """The ``[bookmarks] pickers`` key of a slicer, or its visual id."""
+    return (ctx.options.get("picker_labels") or {}).get(vid, vid)
+
+
 def _check_bookmark(ctx: RuleContext, scope: _Scope, bm: Bookmark, submenu: set[str]) -> None:
+    """One answer bookmark, in the order T1, T3, T4, T9, T4 inherited, T5, T6, T10, T7, T8."""
     dn, path = bm.display_name, bm.path
     cfg = ctx.settings.answer_bookmarks
     options = bm.data.get("options")
-    targets = options.get("targetVisualNames", None) if isinstance(options, dict) else None
-    if not isinstance(options, dict) or "targetVisualNames" not in options:
-        ctx.add("ABK001", path, dn, f"{dn!r}: options.targetVisualNames is missing, "
-                "so the menu entry cannot be clicked; it must be []")
-    elif targets != []:
-        ctx.add("ABK001", path, dn, f"{dn!r}: options.targetVisualNames is "
-                f"{targets!r}, which scopes the bookmark to those visuals; it must be []")
+    has_key = isinstance(options, dict) and "targetVisualNames" in options
+    targets = options.get("targetVisualNames") if has_key else None
+    if not has_key or targets != []:
+        ctx.add("ABK001", path, dn,
+                f"{dn}: not all-visuals targeting ({json.dumps(targets, ensure_ascii=False)})")
 
     section = bm.active_section
     containers = bm.containers()
+    rows = _fields(_container_picks(bm, scope.row_slicer))
+
+    # T3: the matrix is captured and visible
+    matrix = containers.get(scope.matrix_id)
+    single = None
+    if not isinstance(matrix, dict):
+        ctx.add("ABK003", path, dn, f"{dn}: Main Matrix not captured (cannot be made visible)")
+    else:
+        single = matrix.get("singleVisual") if isinstance(matrix.get("singleVisual"), dict) else {}
+        if dig(single, "display", "mode") == "hidden":
+            ctx.add("ABK003", path, dn, f"{dn}: Main Matrix captured as hidden")
+    if single is not None:
+        # T4: rows are this bookmark's own
+        got = _properties(dig(single, "projections", "Rows"), "Column")
+        if rows and got != rows:
+            ctx.add("ABK004", path, dn, f"{dn}: matrix Rows {got} != "
+                    f"{_family(scope.row_param)} selection {rows}")
+        # T9: slot map
+        roles = ("Values",) if cfg.slot_mode == "values-only" else ("Rows", "Values")
+        for role in roles:
+            _check_slots(ctx, scope, bm, single, role, strict=cfg.slot_mode != "values-only")
+        # T4: nothing inherited
+        captured = json.dumps([single.get(k) for k in ("projections", "activeProjections",
+                                                        "prototypeQuery")], ensure_ascii=False)
+        for token in cfg.inherited_fingerprints:
+            if token in captured:
+                ctx.add("ABK004", path, f"{dn} / inherited {token}",
+                        f"{dn}: matrix still carries inherited field {token}")
+        # T5: capture shape
+        if "Values" in (single.get("activeProjections") or {}):
+            ctx.add("ABK005", path, f"{dn} / activeProjections",
+                    f"{dn}: activeProjections must carry Rows only")
+        if single.get("expansionStates"):
+            ctx.add("ABK005", path, f"{dn} / expansionStates",
+                    f"{dn}: stale matrix expansionStates present")
+
+    # T6: every captured picker selects something
+    for picker in scope.picker_ids():
+        if picker in containers and not _container_picks(bm, picker):
+            ctx.add("ABK006", path, f"{dn} / {picker}",
+                    f"{dn}: picker {_picker_label(ctx, picker)} captured with no selection")
+
+    # T10: row dimensions mirrored into the dropdown filters
+    if rows:
+        have: list[str] = []
+        for dropdown in scope.row_dropdowns:
+            have += [f for f in _fields(_container_picks(bm, dropdown)) if f not in have]
+        missing = [r for r in rows if r not in have]
+        if missing:
+            found = sorted(have) if have else "nothing"
+            ctx.add("ABK010", path, dn,
+                    f"{dn}: row dimension(s) {missing} have no dropdown filter — set them in "
+                    f"{_dropdown_span(ctx, scope)} (found there: {found})")
 
     # T7: the analysis category is pinned
     column = ctx.settings.category.column
@@ -257,65 +338,12 @@ def _check_bookmark(ctx: RuleContext, scope: _Scope, bm: Bookmark, submenu: set[
         if dig(f, "expression", "Column", "Property") == column
     ]
     if not any("Literal" in json.dumps(f) for f in category_filters):
-        ctx.add("ABK007", path, dn, f"{dn!r} does not pin [{column}] to a value")
+        ctx.add("ABK007", path, dn, f"{dn}: no {column} pinned")
 
     # T8: registered under a submenu
     if bm.name not in submenu:
-        ctx.add("ABK008", path, dn, f"{dn!r} is not a child of any "
-                f"{cfg.submenu_prefix!r} group in bookmarks.json, so no menu entry renders")
-
-    # T6: every captured picker selects something
-    for picker in scope.picker_ids():
-        if picker in containers and not _container_picks(bm, picker):
-            ctx.add("ABK006", path, f"{dn} / {picker}",
-                    f"{dn!r}: picker {picker!r} is captured with no selection")
-
-    # T10: row dimensions mirrored into the dropdown filters
-    rows = _fields(_container_picks(bm, scope.row_slicer))
-    if rows:
-        have: list[str] = []
-        for dropdown in scope.row_dropdowns:
-            have += [f for f in _fields(_container_picks(bm, dropdown)) if f not in have]
-        missing = [r for r in rows if r not in have]
-        if missing:
-            holding = f"the dropdowns hold {have}" if have else "the dropdowns hold nothing"
-            ctx.add("ABK010", path, dn, f"{dn!r}: row field(s) {missing} have no dropdown "
-                    f"filter ({holding})")
-
-    # T3: the matrix is captured and visible
-    matrix = containers.get(scope.matrix_id)
-    if not isinstance(matrix, dict):
-        ctx.add("ABK003", path, dn, f"{dn!r} does not capture the matrix "
-                f"{scope.matrix_id!r}, which stays hidden")
-        return
-    single = matrix.get("singleVisual") if isinstance(matrix.get("singleVisual"), dict) else {}
-    if dig(single, "display", "mode") == "hidden":
-        ctx.add("ABK003", path, dn, f"{dn!r} captures the matrix as hidden")
-
-    # T4: rows are this bookmark's own, nothing inherited
-    got = _properties(dig(single, "projections", "Rows"), "Column")
-    if rows and got != rows:
-        ctx.add("ABK004", path, dn, f"{dn!r}: matrix rows are {got}, but the row "
-                f"picker selects {rows}")
-    captured = json.dumps([single.get(k) for k in ("projections", "activeProjections",
-                                                    "prototypeQuery")], ensure_ascii=False)
-    for token in cfg.inherited_fingerprints:
-        if token in captured:
-            ctx.add("ABK004", path, f"{dn} / inherited {token}",
-                    f"{dn!r}: the matrix capture carries inherited field {token!r}")
-
-    # T5: capture shape
-    if "Values" in (single.get("activeProjections") or {}):
-        ctx.add("ABK005", path, f"{dn} / activeProjections",
-                f"{dn!r}: activeProjections holds Values")
-    if single.get("expansionStates"):
-        ctx.add("ABK005", path, f"{dn} / expansionStates",
-                f"{dn!r}: the matrix capture keeps expansionStates")
-
-    # T9: slot map
-    roles = ("Values",) if cfg.slot_mode == "values-only" else ("Rows", "Values")
-    for role in roles:
-        _check_slots(ctx, scope, bm, single, role, strict=cfg.slot_mode != "values-only")
+        ctx.add("ABK008", path, dn, f"{dn}: not registered under any {cfg.submenu_prefix} "
+                f"group — unreachable in the UI")
 
 
 def _check_slots(ctx: RuleContext, scope: _Scope, bm: Bookmark, single: dict, role: str,
@@ -324,33 +352,34 @@ def _check_slots(ctx: RuleContext, scope: _Scope, bm: Bookmark, single: dict, ro
     declared = scope.declared(role)
     slots = dig(single, "parameters", role)
     if not slots and strict:
-        ctx.add("ABK009", path, f"{dn} / {role}", f"{dn!r}: no {role} slot map")
+        ctx.add("ABK009", path, f"{dn} / {role}",
+                f"{dn}: matrix has no parameters slot map for {role} — Power BI cannot "
+                f"attribute a projection to a parameter")
         return
     slots = slots if isinstance(slots, list) else []
     entities = [dig(s, "expr", "Column", "Expression", "SourceRef", "Entity") for s in slots]
     if entities != declared:
         ctx.add("ABK009", path, f"{dn} / {role}",
-                f"{dn!r}: {role} slot map names {entities}, the page declares {declared}")
+                f"{dn}: {role} slot map covers {entities} but the page well declares {declared}")
         return
     offset, concat, flagged = 0, [], False
     for param, slot in zip(declared, slots):
         slicer = scope.slicer_for.get(param)
         if slicer is None:
             ctx.add("ABK009", path, f"{dn} / {role}:{param}",
-                    f"{dn!r}: no known slicer for parameter {param!r}; set it in "
-                    f"[answer_bookmarks] slicers")
+                    f"{dn}: {role} declares {param!r} but [answer_bookmarks] slicers has no "
+                    f"slicer for it — cannot verify its slots")
             return
         picks = _fields(_container_picks(bm, slicer))
-        if slot.get("index") != offset or slot.get("length") != len(picks):
+        index, length = slot.get("index"), slot.get("length")
+        if index != offset or length != len(picks):
             flagged = True
-            index, length = slot.get("index"), slot.get("length")
-            outside = picks
-            if isinstance(index, int) and isinstance(length, int):
-                inside = range(index, index + length)
-                outside = [p for i, p in enumerate(picks, start=offset) if i not in inside]
+            start = length if isinstance(length, int) and length >= 0 else 0
+            outside = picks[start:] or picks
             ctx.add("ABK009", path, f"{dn} / {role}:{param}",
-                    f"{dn!r}: {param!r} owns slots ({index}, {length}) but its "
-                    f"{len(picks)} pick(s) start at {offset}; outside its slots: {outside}")
+                    f"{dn}: {role} slot for {param} is (index {index}, length {length}) but "
+                    f"its slicer selects {len(picks)} field(s) at offset {offset} — the picks "
+                    f"outside the slot render nothing: {outside}")
         concat += picks
         offset += len(picks)
     if flagged and strict:
@@ -359,7 +388,7 @@ def _check_slots(ctx: RuleContext, scope: _Scope, bm: Bookmark, single: dict, ro
     got = _properties(dig(single, "projections", role), kind)
     if concat and got != concat:
         ctx.add("ABK009", path, f"{dn} / {role} projections",
-                f"{dn!r}: {role} projections are {got}, the picks are {concat}")
+                f"{dn}: matrix {role} {got} != the concatenated parameter selections {concat}")
 
 
 def _check_page_wells(ctx: RuleContext, scope: _Scope) -> None:
@@ -379,15 +408,16 @@ def _check_page_wells(ctx: RuleContext, scope: _Scope) -> None:
             ]
             if raw:
                 ctx.add("PGW001", visual.path, f"{visual.folder}/{role}",
-                        f"{visual.folder}/{role} projects raw measure(s) {raw} beside its "
-                        f"field parameters; they render in every bookmark")
+                        f"{visual.folder}/{role}: raw measure projections beside "
+                        f"fieldParameters — renders in EVERY bookmark: {raw}")
+    for visual in scope.main.visuals:  # navigators after every well
         if visual.vtype == "bookmarkNavigator":
             text = json.dumps(dig(visual.data, "visual", "objects"))
             match = re.search(r"selectedBookmark.*?'([0-9a-f]{20})'", text)
             if match and match.group(1) not in stems:
                 ctx.add("PGW002", visual.path, visual.folder,
-                        f"navigator {visual.folder!r} selects bookmark "
-                        f"{match.group(1)!r}, which has no file")
+                        f"{visual.folder}: navigator selectedBookmark {match.group(1)} "
+                        f"does not exist")
 
 
 # -- picker literals ----------------------------------------------------------------
@@ -420,6 +450,12 @@ def _picker_slicers(ctx: RuleContext) -> dict[str, str]:
     return pickers
 
 
+_ELSEWHERE = ("registered elsewhere but NOT in {table!r}: this slicer resolves it to BLANK, "
+              "so helpers that parse the selected field name ERROR out. Register the row "
+              "in {table}.tmdl or pick the field in a parameter that has it")
+_NOWHERE = "not registered in ANY field parameter"
+
+
 def check_bookmark_literals(ctx: RuleContext) -> None:
     if ctx.model is None:
         ctx.missing_model("bookmark-literals")
@@ -428,7 +464,8 @@ def check_bookmark_literals(ctx: RuleContext) -> None:
     registry = _registry(ctx)
     pickers = _picker_slicers(ctx)
     only = ctx.options.get("only_display_names")
-    checked = scanned = resolved = 0
+    checked = scanned = resolved = unresolved = 0
+    found_problems: dict[tuple[str, str, str], tuple[str, Path]] = {}
     for bm in ctx.bookmarks:
         if only is not None and bm.display_name not in only:
             continue
@@ -439,29 +476,30 @@ def check_bookmark_literals(ctx: RuleContext) -> None:
                 checked += 1
                 table = pickers.get(cid)
                 anywhere = [t for t, rows in registry.items() if lit in rows]
-                subject = f"{bm.display_name} / {cid} / {lit}"
                 if table is not None:
                     if lit in registry.get(table, set()):
                         resolved += 1
                         continue
                     if anywhere:
-                        ctx.add("BML001", bm.path, subject,
-                                f"{lit} is registered in {', '.join(anywhere)} but not in "
-                                f"{table}, the field parameter behind picker {cid!r}")
+                        problem = ("BML001", _ELSEWHERE.format(table=table))
                     else:
-                        ctx.add("BML002", bm.path, subject,
-                                f"{lit} (picker {cid!r}) is not registered in any field "
-                                f"parameter")
+                        problem = ("BML002", _NOWHERE)
                 elif not anywhere:
-                    ctx.add("BML002", bm.path, subject,
-                            f"{lit} (container {cid!r}) is not registered in any field "
-                            f"parameter")
+                    problem = ("BML002", _NOWHERE)
                 else:
                     resolved += 1
+                    continue
+                unresolved += 1
+                found_problems.setdefault((bm.display_name, lit, problem[1]),
+                                          (problem[0], bm.path))
+    # one finding per (bookmark, literal, reason), sorted by that triple
+    for (display, lit, reason), (check_id, path) in sorted(found_problems.items()):
+        ctx.add(check_id, path, f"{display} / {lit}",
+                f"{display}  ->  {lit}\n{' ' * 16}{reason}")
     ctx.checked["bookmark-literals"] = checked
-    ctx.details["bookmark-literals"] = {"bookmarks scanned": scanned,
-                                        "literals checked": checked,
-                                        "literals resolved": resolved}
+    ctx.details["bookmark-literals"] = {"bookmarks checked": scanned,
+                                        "literals OK": resolved,
+                                        "UNREGISTERED": unresolved}
 
 
 def load_display_name_filter(path: Path) -> set[str]:

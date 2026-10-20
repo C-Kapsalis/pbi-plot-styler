@@ -153,10 +153,11 @@ def test_a_matrix_without_a_row_parameter_notes_the_checks_not_run(report, tmp_p
 
 def test_a_declared_parameter_without_a_slicer_is_named_in_values_only_mode(report, tmp_path):
     shutil.rmtree(_p(report, "pages", MAIN_PAGE, "visuals", "d93bbe99cd9d524857e7"))
-    payload = _answers(report, _config(tmp_path))
+    payload = _answers(report, _config(tmp_path, slot_mode="values-only"))
     messages = [f["message"] for f in of(payload, "T9")]
-    assert any("no known slicer for parameter 'x-Plot Specific 2'" in m for m in messages), messages
-    assert not any("projections are" in m for m in messages)
+    assert "CRM Deals | Pipeline: Values declares 'x-Plot Specific 2' but [answer_bookmarks] " \
+        "slicers has no slicer for it — cannot verify its slots" in messages, messages
+    assert not any("concatenated" in m for m in messages)
 
 
 # -- SC28: unreadable files fail the run ------------------------------------------------
@@ -201,7 +202,7 @@ def test_only_display_names_accepts_an_entries_file(tmp_path):
 def test_text_and_json_say_what_was_checked(report, tmp_path):
     config = _config(tmp_path)
     text = run("check", report, "--rule", "answer-bookmarks", "--config", config)
-    assert "checked  answer-bookmarks: 2 answer bookmarks" in text.output
+    assert "bookmarks tested: 2 | failures: 1" in text.output
     payload = _answers(report, config)
     assert payload["checked"] == {"answer-bookmarks": {"answer bookmarks": 2}}
 
@@ -210,8 +211,7 @@ def test_literal_counts_are_printed(tmp_path):
     shop = copy_fixture("picker-literals", tmp_path)
     payload = check_json(shop / "Shop.Report", "bookmark-literals")
     counts = payload["checked"]["bookmark-literals"]
-    assert counts["bookmarks scanned"] >= 1
-    assert counts["literals checked"] == counts["literals resolved"] == 2
+    assert counts == {"bookmarks checked": 1, "literals OK": 2, "UNREGISTERED": 0}
 
 
 # -- SC31 / SC32: the configured baseline and healed entries ---------------------------
@@ -254,21 +254,26 @@ def test_a_healed_entry_prints_the_update_hint(report, tmp_path):
 def test_an_empty_slot_map_counts_as_missing_in_all_roles_mode(report, tmp_path):
     _edit(_bm(report), lambda d: _mx(d)["parameters"].update(Rows=[]))
     payload = _answers(report, _config(tmp_path, slot_mode="all-roles"))
-    assert any("no Rows slot map" in f["message"] for f in of(payload, "T9"))
+    assert "CRM Deals | Pipeline: matrix has no parameters slot map for Rows — Power BI cannot " \
+        "attribute a projection to a parameter" in [f["message"] for f in of(payload, "T9")]
 
 
 def test_the_slot_message_names_the_picks_outside_their_slots(report, tmp_path):
     _edit(_bm(report), lambda d: _mx(d)["parameters"]["Values"][1].update(index=0))
     payload = _answers(report, _config(tmp_path))
     message = of(payload, "T9")[0]["message"]
-    assert "outside its slots:" in message and "[]" not in message.split("outside its slots:")[1]
+    assert message == ("CRM Deals | Pipeline: Values slot for x-Plot Specific 2 is (index 0, length 1) "
+                       "but its slicer selects 1 field(s) at offset 1 — the picks outside the slot "
+                       "render nothing: ['Deal Value']")
 
 
 def test_the_dropdown_message_says_when_the_dropdowns_hold_nothing(report, tmp_path):
     for dropdown in ROW_DROPDOWNS:
         _edit(_bm(report), lambda d, k=dropdown: _section(d)["visualContainers"].pop(k, None))
     payload = _answers(report, _config(tmp_path))
-    assert "the dropdowns hold nothing" in of(payload, "T10")[0]["message"]
+    assert of(payload, "T10")[0]["message"] == (
+        "CRM Deals | Pipeline: row dimension(s) ['Deal Stage'] have no dropdown filter — set them "
+        "in y-Selector 3/4/5/6 (found there: nothing)")
 
 
 def test_summary_prints_a_fix_hint_under_each_finding(tmp_path):
@@ -321,3 +326,169 @@ def test_a_quoted_and_a_bare_table_qualifier_register_the_same_row(tmp_path):
     table.write_text(text.replace("'Stores'[Region]", "Stores[Region]"), encoding="utf-8")
     payload = check_json(shop / "Shop.Report", "bookmark-literals")
     assert payload["exit_code"] == 0, payload["findings"]
+
+
+# -- exact output ------------------------------------------------------------------
+def _text(report: Path, config: Path, *extra) -> str:
+    return run("check", report, "--rule", "answer-bookmarks", "--config", config, *extra).output
+
+
+def test_header_and_pass_line(report, tmp_path):
+    config = _config(tmp_path)
+    clean = _text(report, config, "--baseline", BASELINES / "whole_page_bookmark_floors.json")
+    assert "bookmarks tested: 2 | failures: 0\n" \
+        "  all visual-level checks pass (ABK001, ABK003-ABK010, PGW001-PGW002)\n" in clean
+    dirty = _text(report, config)
+    assert "bookmarks tested: 2 | failures: 1\n" in dirty and "all visual-level" not in dirty
+
+
+def _messages(report: Path, tmp_path: Path, **extra) -> list[str]:
+    return [f["message"] for f in _answers(report, _config(tmp_path, **extra))["findings"]]
+
+
+def test_findings_follow_the_check_order(report, tmp_path):
+    from answer_bookmark_variants import t7_no_literal, t10_no_mirror
+    t7_no_literal(report)
+    t10_no_mirror(report)
+    ids = [f["id"] for f in _answers(report, _config(tmp_path))["findings"]
+           if f["subject"].startswith("CRM Deals | Pipeline")]
+    assert ids.index("ABK010") < ids.index("ABK007")
+
+
+@pytest.mark.parametrize("variant,text", [
+    ("t1_unscoped", 'CRM Deals | Pipeline: not all-visuals targeting (["cd92884eb63c893f0993"])'),
+    ("t1_missing_key", "CRM Deals | Pipeline: not all-visuals targeting (null)"),
+    ("t3_not_captured", "CRM Deals | Pipeline: Main Matrix not captured (cannot be made visible)"),
+    ("t3_hidden", "CRM Deals | Pipeline: Main Matrix captured as hidden"),
+    ("t4_rows_mismatch", "CRM Deals | Pipeline: matrix Rows ['Deal Owner'] != y-Selector selection "
+                         "['Deal Stage']"),
+    ("t4_inherited", "CRM Deals | Pipeline: matrix still carries inherited field Campaign Actual"),
+    ("t5_active_values", "CRM Deals | Pipeline: activeProjections must carry Rows only"),
+    ("t5_expansion", "CRM Deals | Pipeline: stale matrix expansionStates present"),
+    ("t7_no_literal", "CRM Deals | Pipeline: no Analysis Category pinned"),
+    ("t8_unregistered", "CRM Deals | Pipeline: not registered under any Submenu group — "
+                        "unreachable in the UI"),
+    ("t9_two_params", "CRM Deals | Pipeline: Values slot map covers ['x-Plot Specific 1', "
+                      "'x-Plot Specific 2'] but the page well declares ['x-Plot Specific 1', "
+                      "'x-Plot Specific 2', 'x-Selector 2']"),
+    ("p1_raw_measure", "cd92884eb63c893f0993/Values: raw measure projections beside "
+                       "fieldParameters — renders in EVERY bookmark: ['Won Deals #']"),
+    ("p2_dangling", "9f8e7d6c5b4a39281706: navigator selectedBookmark 0123456789abcdef0123 "
+                    "does not exist"),
+])
+def test_answer_messages(report, tmp_path, variant, text):
+    import answer_bookmark_variants as variants
+    getattr(variants, variant)(report)
+    messages = _messages(report, tmp_path)
+    assert text in messages, messages
+
+
+def test_slot_overlap_messages(report):
+    import answer_bookmark_variants as variants
+    variants.p3_all_at_zero(report)
+    payload = json.loads(run("check", report, "--json").output)
+    messages = [f["message"] for f in payload["findings"] if f["id"] == "FPM001"]
+    assert ("cd92884eb63c893f0993/Values: parameters x-Plot Specific 1 and x-Plot Specific 2 both "
+            "claim slot 0 — the later one wins, so x-Plot Specific 1's picks render in NO bookmark"
+            ) in messages
+    variants.p3_range(report)
+    payload = json.loads(run("check", report, "--json").output)
+    assert ("cd92884eb63c893f0993/Values: parameter x-Selector 2 claims slots 3..4 but the well "
+            "carries only 4 projections") in [f["message"] for f in payload["findings"]]
+
+
+def test_picker_label_comes_from_the_builder_config(report, tmp_path):
+    _empty_picks(report, ROW_DROPDOWNS[0])
+    plain = _messages(report, tmp_path)
+    assert f"CRM Deals | Pipeline: picker {ROW_DROPDOWNS[0]} captured with no selection" in plain
+    config = _config(tmp_path)
+    with config.open("a", encoding="utf-8") as fh:
+        fh.write(f'\n[bookmarks]\npickers = {{y_selector_3 = "{ROW_DROPDOWNS[0]}"}}\n')
+    labelled = [f["message"] for f in _answers(report, config)["findings"]]
+    assert "CRM Deals | Pipeline: picker y_selector_3 captured with no selection" in labelled
+
+
+def test_guidance_follows_a_run_of_findings(report, tmp_path):
+    from answer_bookmark_variants import t5_expansion
+    t5_expansion(report)
+    out = _text(report, _config(tmp_path), "--baseline", BASELINES / "whole_page_bookmark_floors.json")
+    block = ("ABK005 — NEW finding(s), not in the baseline:\n"
+             "ERROR    ABK005  -Insights.Report/definition/bookmarks/b1a2c3d4e5f60718293a.bookmark.json: "
+             "CRM Deals | Pipeline: stale matrix expansionStates present\n"
+             "\n"
+             "projections = Rows AND Values; activeProjections = Rows only (the first\n"
+             "field). Values in activeProjections collapses the matrix to one column.\n"
+             "expansionStates pin row expansion against specific fields, so inherited\n"
+             "from a base they point at fields this bookmark does not use.\n")
+    assert block in out
+
+
+def test_healed_line(report, tmp_path):
+    from answer_bookmark_variants import OWNERS
+    _edit(_bm(report, OWNERS), lambda d: d["options"].update(targetVisualNames=[]))
+    out = _text(report, _config(tmp_path), "--baseline", BASELINES / "whole_page_bookmark_floors.json")
+    assert ("ABK001: 1 accepted finding(s) no longer occur — re-capture the baseline "
+            "(pbi-plot-styler check --update-baseline) to lock it in: "
+            "['-Insights.Report/definition/bookmarks/c2b3d4e5f6a708192a3b.bookmark.json::CRM Deals | Owners']"
+            ) in out
+
+
+def test_vacuity_message(report, tmp_path):
+    config = _config(tmp_path)
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        str(list(CATEGORY_PREFIXES)).replace("'", '"'), '["Nothing Here |"]'), encoding="utf-8")
+    payload = _answers(report, config)
+    assert of(payload, "vacuity")[0]["message"] == (
+        "no whole-page category bookmarks matched [answer_bookmarks] prefixes, so every check "
+        "passed on an empty set. Either the naming convention changed or the report moved. "
+        "Prefixes currently expected: ['Nothing Here |']")
+
+
+def _literal_shop(tmp_path: Path) -> Path:
+    return copy_fixture("picker-literals", tmp_path)
+
+
+def _set_picker(shop: Path, container: str, values: list[str]) -> None:
+    path = shop / "Shop.Report" / "definition" / "bookmarks" / f"{LIT_BOOKMARK}.bookmark.json"
+    data = load(path)
+    sv = data["explorationState"]["sections"][LIT_PAGE]["visualContainers"][container]["singleVisual"]
+    cond = sv["objects"]["merge"]["general"][0]["properties"]["filter"]["filter"]["Where"][0]["Condition"]
+    cond["In"]["Values"] = [[{"Literal": {"Value": v}}] for v in values]
+    data["explorationState"]["sections"][LIT_PAGE]["visualContainers"].update({
+        f"card0{i}": {"singleVisual": {"visualType": "card", "objects": {"general": [{"properties": {
+            "x": {"expr": {"Literal": {"Value": "'''Stores''[Code]'"}}}}}]}}} for i in (1, 2)})
+    dump(path, data)
+
+
+def test_literal_count_line_and_deduplicated_findings(tmp_path):
+    shop = _literal_shop(tmp_path)
+    clean = run("check", shop / "Shop.Report", "--rule", "bookmark-literals").output
+    assert clean.splitlines()[0] == "bookmarks checked: 1 | literals OK: 2 | UNREGISTERED: 0"
+    _set_picker(shop, "xpicker01", ["'''Stores''[Region]'", "'''Stores''[Code]'"])
+    _set_picker(shop, "ypicker01", ["'''Stores''[Code]'"])
+    out = run("check", shop / "Shop.Report", "--rule", "bookmark-literals").output
+    first = out.splitlines()[0]
+    assert first.startswith("bookmarks checked: 1 | literals OK: ") and first.endswith(" | UNREGISTERED: 5")
+    payload = check_json(shop / "Shop.Report", "bookmark-literals")
+    messages = [f["message"] for f in payload["findings"]]
+    assert messages == [
+        "Sales | Revenue  ->  'Stores'[Code]\n" + " " * 16 + "not registered in ANY field parameter",
+        "Sales | Revenue  ->  'Stores'[Region]\n" + " " * 16 + "registered elsewhere but NOT in "
+        "'x-Selector 1': this slicer resolves it to BLANK, so helpers that parse the selected field "
+        "name ERROR out. Register the row in x-Selector 1.tmdl or pick the field in a parameter "
+        "that has it",
+    ]
+
+
+def test_only_display_names_help():
+    out = " ".join(run("check", "--help").output.split())
+    assert "config json — check only bookmarks it names" in out
+
+
+def test_projection_order_message(report, tmp_path):
+    from answer_bookmark_variants import t9_order
+    t9_order(report)
+    messages = [m for m in _messages(report, tmp_path) if "concatenated" in m]
+    assert len(messages) == 1
+    assert messages[0].startswith("CRM Deals | Pipeline: matrix Values ['")
+    assert "'] != the concatenated parameter selections ['" in messages[0]
