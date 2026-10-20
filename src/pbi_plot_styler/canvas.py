@@ -521,16 +521,42 @@ def load_bookmarks(report_dir: Path) -> list[Bookmark]:
 
 # A slicer selection literal: '''<table>''[<field>]' (table: shortest match,
 # field: greedy).
-_SELECTION = re.compile(r"^'''(.+?)''\[(.+)\]'$", re.DOTALL)
+#: A saved field-parameter pick, ``'''T''[C]'``: inside the outer quotes an
+#: apostrophe of the table or column name is written four times and a closing
+#: bracket of the column name twice.
+_SELECTION = re.compile(r"^'''((?:[^']|'''')+)''\[((?:[^\]]|\]\])+)\]'$", re.DOTALL)
 # The same literal anywhere inside a serialized container.
-SELECTION_IN_TEXT = re.compile(r"'''([^']+)''\[([^\]]+)\]'")
 
 
 def parse_selection(value: Any) -> tuple[str, str] | None:
     if not isinstance(value, str):
         return None
     match = _SELECTION.match(value)
-    return (match.group(1), match.group(2)) if match else None
+    if not match:
+        return None
+    four = "'" * 4
+    table = match.group(1).replace(four, "'")
+    column = match.group(2).replace("]]", "]").replace(four, "'")
+    return table, column
+
+
+def selection_literals(node: Any) -> list[tuple[str, str]]:
+    """Every ``(table, field)`` pick held by a ``Literal`` anywhere in ``node``.
+
+    Names come back unescaped; each pick is listed once, in document order.
+    """
+    found: list[tuple[str, str]] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            parsed = parse_selection(dig(current, "Literal", "Value"))
+            if parsed and parsed not in found:
+                found.append(parsed)
+            stack.extend(reversed(list(current.values())))
+        elif isinstance(current, list):
+            stack.extend(reversed(current))
+    return found
 
 
 def slicer_filter(container: Any) -> dict | None:

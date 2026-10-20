@@ -36,7 +36,7 @@ _MEASURE_DECL = re.compile(
 _NAMEOF_REF = re.compile(
     r"NAMEOF\s*\(\s*"
     r"(?:'((?:[^'\n]|'')+)'|([A-Za-z_][^'\"\[\]\n(),]*?))?"  # optional table
-    r"\s*\[([^\]\n]+)\]\s*\)",
+    r"\s*\[((?:[^\]\n]|\]\])+)\]\s*\)",
     re.IGNORECASE,
 )
 
@@ -280,7 +280,7 @@ class SemanticModel:
             in_tuple = bool(re.compile(r"\s*,").match(source, ref.end()))
             ordinal = _ORDINAL_AFTER.match(source, ref.end())
             refs.append(NameofRef(
-                qualifier, ref.group(3).strip(), in_tuple,
+                qualifier, ref.group(3).replace("]]", "]").strip(), in_tuple,
                 float(ordinal.group(1)) if ordinal else None,
             ))
         return refs

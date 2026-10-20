@@ -35,12 +35,12 @@ from pathlib import Path
 from typing import Any
 
 from ..canvas import (
-    SELECTION_IN_TEXT,
     Bookmark,
     Page,
     Visual,
     dig,
     read_json,
+    selection_literals,
     selections,
     slicer_selector_tables,
 )
@@ -372,8 +372,7 @@ def check_bookmark_literals(ctx: RuleContext) -> None:
         if only is not None and bm.display_name not in only:
             continue
         for cid, container in bm.containers().items():
-            text = json.dumps(container, ensure_ascii=False)
-            found = sorted({f"'{t}'[{f}]" for t, f in SELECTION_IN_TEXT.findall(text)})
+            found = sorted({f"'{t}'[{f}]" for t, f in selection_literals(container)})
             for lit in found:
                 checked += 1
                 table = pickers.get(cid)

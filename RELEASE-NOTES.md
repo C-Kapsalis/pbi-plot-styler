@@ -152,7 +152,9 @@
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and
-  column names. `format-selector` compares against the escaped form.
+  column names. `format-selector` compares against the escaped form, and
+  `bookmark-literals` and every reader of saved picks unescape them (a
+  `NAMEOF` column written with `]]` is read as one name).
 
 ### Notes on choices made where the specs left room
 
