@@ -7,6 +7,7 @@ committed baseline file keeps working across releases:
 Id      Severity  Finding
 ======  ========  ==========================================================
 JSN001  error     A report file is not valid JSON.
+MDL001  error     The paired semantic model exists but cannot be loaded.
 BND001  error     A field reference (``SourceRef`` entity plus property, or
                   a ``From`` entity) does not resolve in the paired model.
 BND002  error     A ``queryRef`` or ``selector.metadata`` string does not
@@ -43,7 +44,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from .tmdl import SemanticModel
 from .textio import load_json
@@ -51,6 +52,7 @@ from .textio import load_json
 #: id -> (severity, short title)
 CHECKS: dict[str, tuple[str, str]] = {
     "JSN001": ("error", "invalid JSON"),
+    "MDL001": ("error", "the paired semantic model cannot be loaded"),
     "BND001": ("error", "unresolved field reference"),
     "BND002": ("error", "unresolved queryRef / metadata string"),
     "BMK001": ("error", "unknown bookmark options key"),
@@ -124,6 +126,9 @@ class Finding:
     subject: str
     message: str
     fixable: bool = False
+    #: tells apart findings that share a subject (an FPM001 slot); part of
+    #: the key and location, never of the subject a person reads.
+    distinct: str = ""
 
     @property
     def severity(self) -> str:
@@ -132,7 +137,8 @@ class Finding:
     @property
     def location(self) -> str:
         """Stable location: the file plus the offending name, never an index."""
-        return f"{self.file}::{self.subject}"
+        tail = f"#{self.distinct}" if self.distinct else ""
+        return f"{self.file}::{self.subject}{tail}"
 
     @property
     def key(self) -> tuple[str, str]:
@@ -140,6 +146,7 @@ class Finding:
 
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
+        out.pop("distinct")
         out["id"] = out.pop("check_id")
         out["severity"] = self.severity
         out["location"] = self.location
@@ -410,8 +417,8 @@ class ReportContext:
         return path.relative_to(self.root).as_posix()
 
     def add(self, check_id: str, path: Path, subject: str, message: str,
-            fixable: bool = False) -> None:
-        finding = Finding(check_id, self.rel(path), subject, message, fixable)
+            fixable: bool = False, distinct: str = "") -> None:
+        finding = Finding(check_id, self.rel(path), subject, message, fixable, distinct)
         if finding.key not in {f.key for f in self.findings}:
             self.findings.append(finding)
 
@@ -485,9 +492,10 @@ def _check_field_parameter_slots(ctx: ReportContext, path: Path, data: Any) -> N
                         f"claim slot {slot}"
                     )
                     ctx.add(
-                        "FPM001", path, f"{role}:{slot}:{earlier}|{name}",
+                        "FPM001", path, f"{role}:{earlier}|{name}",
                         f"{role}: {what}; the later claim wins, so the earlier "
                         f"picks never render",
+                        distinct=f"slot{slot}",
                     )
                 # The latest claimant owns the slot, so a third claim is
                 # paired with the second.
@@ -719,9 +727,13 @@ def load_baseline(path: Path) -> set[tuple[str, str]]:
     }
 
 
-def write_baseline(path: Path, findings: list[Finding]) -> None:
+def write_baseline(path: Path, findings: list[Finding],
+                   keep: Iterable[tuple[str, str]] = ()) -> None:
+    """Write ``findings`` plus the ``keep`` entries (id, location) of other scopes."""
+    by_key = {key: {"id": key[0], "location": key[1]} for key in keep}
+    by_key.update({f.key: {"id": f.check_id, "location": f.location} for f in findings})
     entries = sorted(
-        {f.key: {"id": f.check_id, "location": f.location} for f in findings}.values(),
+        by_key.values(),
         key=lambda e: (e["id"], e["location"]),
     )
     path.write_text(

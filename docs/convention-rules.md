@@ -5,11 +5,16 @@ bookmarks, field-parameter slots, theme files; see the README). The rules on
 this page check the conventions of the standard canvas page and run only when
 named with `--rule SLUG` (repeatable). They share the `check` machinery:
 stable ids, `--json`, `--baseline` / `--update-baseline`, exit codes `0` (no
-new errors), `1` (new errors) and `2` (setup problem).
+new errors), `1` (new errors) and `2` (setup problem). `--update-baseline`
+with `--rule`, `--report` or `--model-name` rewrites only that scope's
+entries. `--fix --dry-run` prints the diff of every planned fix and writes
+nothing. With several reports, `--fix` checks every report's prerequisites
+before writing any.
 
 Rules that cannot judge a report say so in a `skipped` list (text output:
 `skipped` lines) instead of passing silently: no y-combo groups, no selector
-slicer, an ambiguous placeholder, no paired model.
+slicer, an ambiguous placeholder, no paired model. A model that is referenced
+but cannot be loaded is an `MDL001` error, not a skip.
 
 ## Vocabulary and settings
 
@@ -218,5 +223,6 @@ the active section is checked:
 
 `check --summary` runs `slicer-gates`, `category-filter`, `theme` and
 `filter-panel` and reports per rule how many components were checked and
-passed and whether it is compliant (no error among its critical ids), plus
+passed (failures among its critical ids) and whether it is compliant (no
+error finding at all), plus
 the overall percentage. It never fails; `--json` adds a `compliance` object.

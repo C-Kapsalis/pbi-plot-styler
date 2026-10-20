@@ -31,6 +31,8 @@ class RuleContext(ReportContext):
     settings: Settings = field(default_factory=Settings)
     options: dict[str, Any] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
+    #: why the paired model failed to load, when it did (MDL001).
+    model_error: str | None = None
     #: rule slug -> number of components the rule judged (for --summary).
     checked: dict[str, int] = field(default_factory=dict)
     _index: ReportIndex | None = None
@@ -52,6 +54,14 @@ class RuleContext(ReportContext):
     def label(self) -> str:
         return self.rel(self.report_dir)
 
+    def missing_model(self, rule: str) -> None:
+        """Note that ``rule`` was skipped for want of a usable model."""
+        if self.model_error:
+            self.skip(f"{rule}: the paired semantic model could not be loaded "
+                      f"(see MDL001)")
+        else:
+            self.skip(f"{rule}: no paired semantic model")
+
     def skip(self, message: str) -> None:
         note = f"{self.label}: {message}"
         if note not in self.skipped:
@@ -69,6 +79,9 @@ class Rule:
     ids: tuple[str, ...]
     check: Callable[[RuleContext], None]
     fix: Fixer | None = None
+    #: raises :class:`RuleError` when the fixer could not run on a report;
+    #: called for every report before any fixer writes.
+    prepare: Callable[[RuleContext], Any] | None = None
     #: ids whose error findings make the rule non-compliant in --summary.
     critical: tuple[str, ...] = ()
 
@@ -91,7 +104,8 @@ def _registry() -> dict[str, Rule]:
              ("GAT001", "GAT002"), gates.check_slicer_gates, gates.fix_slicer_gates,
              critical=("GAT001", "GAT002")),
         Rule("slicer-mode-gates", "slicer gates match the slicer mode",
-             ("GAT003", "GAT004", "GAT005"), gates.check_mode_gates, gates.fix_mode_gates),
+             ("GAT003", "GAT004", "GAT005"), gates.check_mode_gates, gates.fix_mode_gates,
+             prepare=gates.gate_host_table),
         Rule("category-filter", "answer bookmarks set the analysis category",
              ("CAT001",), category.check_category_filter, critical=("CAT001",)),
         Rule("theme", "theme collection present, no hex literals",

@@ -51,7 +51,10 @@ def _problem(data: Any, cfg: FormatSelectorSection) -> str | None:
 
 def _active(ctx: RuleContext) -> bool:
     cfg = ctx.settings.format_selector
-    if ctx.model is None or ctx.model.table_named(cfg.table) is None:
+    if ctx.model is None:
+        ctx.missing_model("format-selector")
+        return False
+    if ctx.model.table_named(cfg.table) is None:
         ctx.skip(f"format-selector: the paired model has no {cfg.table!r} table")
         return False
     return True

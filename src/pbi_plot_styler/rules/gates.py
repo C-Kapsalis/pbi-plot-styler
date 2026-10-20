@@ -239,18 +239,18 @@ def fix_slicer_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
 
 # -- slicer-mode-gates ----------------------------------------------------------------
 def gate_host_table(ctx: RuleContext) -> str:
-    """The first table of a sibling model declaring both gate measures."""
+    """The first table of the report's model declaring both gate measures.
+
+    The model is the one every other rule uses (``definition.pbir`` or
+    ``--model``), so nested report layouts resolve the same way.
+    """
     gates = ctx.settings.gates
-    for model_dir in sorted(ctx.report_dir.parent.glob("*.SemanticModel")):
-        try:
-            model = SemanticModel.load(model_dir)
-        except (FileNotFoundError, OSError):
-            continue
-        for table, measures in model.measures_by_table.items():
+    if ctx.model is not None:
+        for table, measures in ctx.model.measures_by_table.items():
             if gates.slicer_measure in measures and gates.list_measure in measures:
                 return table
     raise RuleError(
-        f"{ctx.label}: no sibling semantic model declares both "
+        f"{ctx.label}: the paired semantic model does not declare both "
         f"[{gates.slicer_measure}] and [{gates.list_measure}] on one table "
         f"(expected {gates.table!r}); nothing was checked or changed"
     )

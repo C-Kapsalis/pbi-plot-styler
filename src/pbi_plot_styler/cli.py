@@ -517,6 +517,12 @@ def _filtered_reports(path: Path, report_name: str | None, model_name: str | Non
     "then check again. Fixers write only the files that need a change.",
 )
 @click.option(
+    "--dry-run",
+    is_flag=True,
+    help="With --fix: print the diff of every change the fixers would make "
+    "and write nothing. Exits 1 when there is something to fix.",
+)
+@click.option(
     "--summary",
     is_flag=True,
     help="Report compliance with the four foundation rules (slicer-gates, "
@@ -551,6 +557,7 @@ def check(
     model_name: str | None,
     as_json: bool,
     fix: bool,
+    dry_run: bool,
     summary: bool,
     only_names: Path | None,
     baseline_path: Path | None,
@@ -572,6 +579,8 @@ def check(
         raise StylerError(
             f"unknown rule(s) {', '.join(unknown)}. Valid rules: {_rule_help()}."
         )
+    if dry_run and not fix:
+        raise StylerError("--dry-run only applies to --fix: add --fix to preview the fixes.")
     if update_baseline and baseline_path is None:
         raise StylerError("--update-baseline needs --baseline FILE to write to.")
     accepted: set[tuple[str, str]] = set()
@@ -615,47 +624,53 @@ def check(
             f"definition/pages), or a folder that contains one or more of them."
         )
     root = path if not discovery.single else path.parent
-    models: dict[Path, SemanticModel] = {}
-    notes: list[str] = []
+    report_labels = {r: r.relative_to(root).as_posix() for r in reports}
+    contexts, notes, model_findings = _load_models(reports, root, model_dir, settings, options)
     fixed: list[tuple[Path, str]] = []
+    planned: list[tuple[Path, str]] = []
+    diffs: list[str] = []
     refused: list[tuple[Path, str]] = []
     findings: list[Finding] = []
     skipped_notes: list[str] = []
     checked: dict[str, int] = {}
 
+    def keep_notes(ctx: RuleContext) -> None:
+        skipped_notes.extend(n for n in ctx.skipped if n not in skipped_notes)
+
+    if fix:
+        fixers = [registry[s] for s in slugs if registry[s].fix is not None]
+        # Everything a fixer needs is checked for every report before any
+        # report is written, so a setup problem never leaves half a fix.
+        try:
+            for report in reports:
+                for rule in fixers:
+                    if rule.prepare is not None:
+                        rule.prepare(contexts[report]())
+        except RuleError as exc:
+            raise StylerError(f"{exc}. --fix stopped before writing: nothing was written.") from exc
+        if dry_run:
+            planned, diffs, refused = _plan_fixes(reports, root, fixers, contexts, keep_notes)
+        else:
+            try:
+                for report in reports:
+                    for rule in fixers:
+                        ctx = contexts[report]()
+                        fixed += rule.fix(ctx)
+                        refused += ctx.options.pop("refused", [])
+                        keep_notes(ctx)
+            except RuleError as exc:
+                raise StylerError(_partial_fix_message(exc, fixed, root)) from exc
+
     for report in reports:
-        model: SemanticModel | None = None
+        ctx = contexts[report]()
         try:
-            resolved = (model_dir or resolve_model_dir(report)).resolve()
-            if resolved not in models:
-                models[resolved] = SemanticModel.load(resolved)
-            model = models[resolved]
-        except (FileNotFoundError, json.JSONDecodeError) as exc:
-            notes.append(
-                f"{report.relative_to(root).as_posix()}: binding checks "
-                f"skipped, no local semantic model ({exc})"
-            )
-
-        def context() -> RuleContext:
-            return RuleContext(report, root, model, settings=settings, options=options)
-
-        try:
-            if fix:
-                for slug in slugs:
-                    fixer = registry[slug].fix
-                    if fixer is None:
-                        continue
-                    ctx = context()
-                    fixed += fixer(ctx)
-                    refused += ctx.options.pop("refused", [])
-                    skipped_notes += [n for n in ctx.skipped if n not in skipped_notes]
-            ctx = context()
             for slug in slugs:
                 registry[slug].check(ctx)
         except RuleError as exc:
             raise StylerError(str(exc)) from exc
-        findings += sorted(ctx.findings, key=lambda f: (f.file, f.check_id, f.subject))
-        skipped_notes += [n for n in ctx.skipped if n not in skipped_notes]
+        findings += sorted(model_findings.get(report, []) + ctx.findings,
+                           key=lambda f: (f.file, f.check_id, f.subject))
+        keep_notes(ctx)
         for slug, n in ctx.checked.items():
             checked[slug] = checked.get(slug, 0) + n
 
@@ -663,10 +678,17 @@ def check(
     new = [f for f in findings if f.key not in accepted]
     healed = sorted(accepted - current)
     if update_baseline:
-        write_baseline(baseline_path, findings)
+        in_scope = _baseline_scope(registry, slugs, report_labels.values())
+        kept = []
+        if baseline_path.is_file():
+            try:
+                kept = [k for k in load_baseline(baseline_path) if not in_scope(k)]
+            except (ValueError, json.JSONDecodeError) as exc:
+                raise StylerError(str(exc)) from exc
+        write_baseline(baseline_path, findings, keep=kept)
     new_errors = [f for f in new if f.severity == "error"]
     failing = bool(new_errors) and not update_baseline and not summary
-    exit_code = EXIT_DRIFT if failing else EXIT_OK
+    exit_code = EXIT_DRIFT if failing or (dry_run and planned) else EXIT_OK
     compliance = _compliance(registry, findings, checked) if summary else None
 
     if as_json:
@@ -681,6 +703,9 @@ def check(
             "healed": [{"id": i, "location": loc} for i, loc in healed],
             "fixed": [
                 {"file": p.relative_to(root).as_posix(), "change": d} for p, d in fixed
+            ],
+            "planned": [
+                {"file": p.relative_to(root).as_posix(), "change": d} for p, d in planned
             ],
             "refused": [
                 {"file": p.relative_to(root).as_posix(), "reason": r} for p, r in refused
@@ -706,6 +731,10 @@ def check(
             click.echo(f"skipped  {note}")
         for p, d in fixed:
             click.echo(f"fixed    {p.relative_to(root).as_posix()}: {d}")
+        for p, d in planned:
+            click.echo(f"would fix {p.relative_to(root).as_posix()}: {d}")
+        for diff in diffs:
+            click.echo(diff, nl=False)
         for p, r in refused:
             click.echo(f"REFUSED  {p.relative_to(root).as_posix()}: {r}")
         for f in new:
@@ -732,6 +761,122 @@ def check(
     sys.exit(exit_code)
 
 
+def _load_models(reports, root: Path, model_dir: Path | None, settings: Settings,
+                 options: dict):
+    """One context factory per report, the notes, and MDL001 per report.
+
+    A report with no local model reference is only a note. A model that is
+    referenced but cannot be loaded is an ``MDL001`` error: the rules that
+    need it are skipped, and their notes say why.
+    """
+    loaded: dict[Path, SemanticModel | Exception] = {}
+    contexts = {}
+    notes: list[str] = []
+    model_findings: dict[Path, list[Finding]] = {}
+    for report in reports:
+        label = report.relative_to(root).as_posix()
+        model: SemanticModel | None = None
+        error: str | None = None
+        try:
+            resolved = (model_dir or resolve_model_dir(report)).resolve()
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            notes.append(f"{label}: binding checks skipped, no local semantic model ({exc})")
+            resolved = None
+        if resolved is not None and not resolved.is_dir():
+            notes.append(f"{label}: binding checks skipped, no local semantic model "
+                         f"({resolved.name} is not a folder next to the report)")
+            resolved = None
+        if resolved is not None:
+            if resolved not in loaded:
+                try:
+                    loaded[resolved] = SemanticModel.load(resolved)
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    loaded[resolved] = exc
+            outcome = loaded[resolved]
+            if isinstance(outcome, Exception):
+                error = str(outcome) or type(outcome).__name__
+                source = report / "definition.pbir" if model_dir is None else resolved
+                where = (source.relative_to(root).as_posix()
+                         if source.is_relative_to(root) else source.as_posix())
+                model_findings[report] = [Finding(
+                    "MDL001", where, resolved.name,
+                    f"the semantic model {resolved.name} cannot be loaded: {error}")]
+            else:
+                model = outcome
+
+        def factory(report=report, model=model, error=error) -> RuleContext:
+            return RuleContext(report, root, model, settings=settings, options=options,
+                               model_error=error)
+        contexts[report] = factory
+    return contexts, notes, model_findings
+
+
+def _plan_fixes(reports, root: Path, fixers, contexts, keep_notes):
+    """Run the fixers on a scratch copy of each report: what would change.
+
+    Returns ``(planned, diffs, refused)``; nothing under ``root`` is written.
+    """
+    import difflib
+    import shutil
+    import tempfile
+
+    planned: list[tuple[Path, str]] = []
+    diffs: list[str] = []
+    refused: list[tuple[Path, str]] = []
+    with tempfile.TemporaryDirectory() as scratch:
+        for report in reports:
+            rel = report.relative_to(root)
+            copy = Path(scratch) / rel
+            shutil.copytree(report, copy)
+            before = {p.relative_to(copy): p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+            real = contexts[report]()
+            for rule in fixers:
+                ctx = RuleContext(copy, Path(scratch), real.model, settings=real.settings,
+                                  options=real.options, model_error=real.model_error)
+                try:
+                    changes = rule.fix(ctx)
+                except RuleError as exc:
+                    raise StylerError(f"{exc}. Dry run: nothing was written.") from exc
+                planned += [(root / p.relative_to(scratch), d) for p, d in changes]
+                refused += [(root / p.relative_to(scratch), r)
+                            for p, r in ctx.options.pop("refused", [])]
+                keep_notes(ctx)
+            after = {p.relative_to(copy): p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+            for name in sorted(set(before) | set(after)):
+                old, new = before.get(name, b""), after.get(name, b"")
+                if old == new:
+                    continue
+                shown = (rel / name).as_posix()
+                diffs.append("".join(difflib.unified_diff(
+                    old.decode("utf-8-sig").splitlines(keepends=True),
+                    new.decode("utf-8-sig").splitlines(keepends=True),
+                    fromfile=f"a/{shown}" if name in before else "/dev/null",
+                    tofile=f"b/{shown}" if name in after else "/dev/null")))
+    return planned, diffs, refused
+
+
+def _partial_fix_message(exc: Exception, fixed, root: Path) -> str:
+    """The error for a fixer that failed after others had written."""
+    if not fixed:
+        return f"{exc}. --fix stopped: nothing was written."
+    lines = [f"{exc}. --fix stopped; these changes were already written:"]
+    lines += [f"  {p.relative_to(root).as_posix()}: {d}" for p, d in fixed]
+    return "\n".join(lines)
+
+
+def _baseline_scope(registry, slugs, report_labels):
+    """Whether a baseline entry belongs to this run (and is rewritten by it)."""
+    ids = {"MDL001"}
+    for slug in slugs:
+        ids.update(registry[slug].ids)
+    prefixes = tuple(f"{label}/" for label in report_labels)
+
+    def in_scope(entry: tuple[str, str]) -> bool:
+        check_id, location = entry
+        return check_id in ids and location.startswith(prefixes)
+    return in_scope
+
+
 def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> dict:
     """Per-rule compliance for the foundation rules (``--summary``)."""
     rows = []
@@ -746,7 +891,9 @@ def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> d
             "title": rule.title,
             "checked": total,
             "passed": max(total - failing, 0),
-            "compliant": not critical,
+            # any error finding of the rule breaks compliance, not only the
+            # critical ids (those still decide the passed count)
+            "compliant": not any(f.severity == "error" for f in own),
             "errors": sum(f.severity == "error" for f in own),
             "warnings": sum(f.severity == "warning" for f in own),
         })
@@ -757,7 +904,8 @@ def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> d
         "compliance_percentage": round(100.0 * compliant / len(rows), 1),
         "errors": sum(r["errors"] for r in rows),
         "warnings": sum(r["warnings"] for r in rows),
-        "overall_compliance": compliant == len(rows),
+        "overall_compliance": compliant == len(rows)
+        and not any(r["errors"] for r in rows),
         "rules": rows,
     }
 

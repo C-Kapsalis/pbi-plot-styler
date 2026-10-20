@@ -362,7 +362,7 @@ def _picker_slicers(ctx: RuleContext) -> dict[str, str]:
 
 def check_bookmark_literals(ctx: RuleContext) -> None:
     if ctx.model is None:
-        ctx.skip("bookmark-literals: no paired semantic model")
+        ctx.missing_model("bookmark-literals")
         return
     registry = _registry(ctx)
     pickers = _picker_slicers(ctx)

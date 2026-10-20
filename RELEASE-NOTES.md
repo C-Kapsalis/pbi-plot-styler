@@ -83,10 +83,14 @@
 - **STRICTER: `FPM001` reports more overlaps.** A parameter that claims a
   slot it already claimed is now a finding; each claim is paired with the
   most recent earlier claimant of the slot (a third claimant is paired with
-  the second, not the first); and each overlapping slot is its own finding
-  (subject `role:slot:A|B`, previously `role:A|B`). Reports with overlaps can
-  show more `FPM001` findings than before; a baseline recorded with v1.1.0
-  needs `--update-baseline` for those entries.
+  the second, not the first); and each overlapping slot is its own finding.
+  The subject stays `role:A|B`; the slot is part of the location
+  (`...::role:A|B#slotN`), so each slot is baselined on its own. Reports with
+  overlaps can show more `FPM001` findings than before; a baseline recorded
+  with v1.1.0 needs `--update-baseline` for those entries.
+- `check --fix --dry-run` prints a unified diff of every change the fixers
+  would make and writes nothing (exit `1` when something would change).
+  `--dry-run` without `--fix` is a usage error.
 - **STRICTER: `slicer-gates` checks bookmark captures too** (`GAT002`), not
   only the slicer visuals.
 - `plotstyler.toml` accepts the sections of `check` and `bookmarks build`
@@ -110,6 +114,22 @@
   `style`, the `check --fix` fixers and `bookmarks build --keep-ids`.
   Previously a BOM in `definition.pbir` made the model unresolvable and a
   BOM in `visual.json` made `style` skip the visual.
+- A semantic model that `definition.pbir` (or `--model`) points at but that
+  cannot be loaded is now an `MDL001` error (exit `1`) on the report, and the
+  rules that need the model say it could not be loaded. Previously they were
+  skipped with a note that blamed a missing table. A report with no local
+  model is still only a note.
+- `check --fix` over several reports checks every report's fixer
+  prerequisites before writing anything; if a fixer still fails part-way,
+  the error lists the changes already written instead of claiming nothing
+  changed.
+- `slicer-mode-gates` uses the report's own model (`definition.pbir` or
+  `--model`) like every other rule, so nested report folders resolve.
+- `--update-baseline` combined with `--rule`, `--report` or `--model-name`
+  rewrites only the entries of that scope; entries of other rules and
+  reports are kept.
+- `--summary` no longer reports a rule (or the run) as compliant while it has
+  error findings.
 
 ### Notes on choices made where the specs left room
 

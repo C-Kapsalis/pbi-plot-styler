@@ -133,7 +133,7 @@ def _hits_in_bookmark(judge: _Judge, path: Path, data: Any) -> Iterator[_Hit]:
 
 def _collect(ctx: RuleContext) -> tuple[list[_Hit], dict[Path, Any]]:
     if ctx.model is None:
-        ctx.skip("stale-placeholders: no paired semantic model")
+        ctx.missing_model("stale-placeholders")
         return [], {}
     judge = _Judge(ctx)
     hits: list[_Hit] = []
