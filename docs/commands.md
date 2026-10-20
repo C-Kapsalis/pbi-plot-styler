@@ -88,8 +88,12 @@ and keeps its name, and new bookmarks go to the front of the group.
 `--legacy-layout` renders the single-page layout: the `x_selector_1` picker
 (`legacy_measures`) fills the matrix values (at least 3), the row picker 1 to
 3 rows, the matrix sorts on the first measure, and unmentioned pickers are
-emptied, except the values slicers listed in `legacy_values_slicers`, which
-are cleared and then set to the first `legacy_measures` pick. `--dry-run` builds everything and writes nothing. Any invalid entry,
+emptied. Values slicers are `pickers` keys named `y_values_slicer_<N>`
+(N = 2..6), each listing the values of the dimension picked in
+`y_selector_<N>`: the layout always clears their preselection and, when
+`y_selector_<N>` has picks, points their column at its first pick (never a
+measure). They cannot be picked in an entry, and one the base bookmark does
+not capture is skipped. `--dry-run` builds everything and writes nothing. Any invalid entry,
 missing picker, filter or capture stops the run with exit `2` before a file
 is written.
 

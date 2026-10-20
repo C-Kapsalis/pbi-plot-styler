@@ -452,36 +452,137 @@ def test_dropdowns_without_a_row_lose_the_base_bookmark_pick(builder, tmp_path):
         assert _picker_values_or_none(sec, PICKERS[key]) == [], key
 
 
-def test_legacy_layout_syncs_the_values_slicers_to_the_first_measure(builder, tmp_path):
+# -- legacy layout: values slicers --------------------------------------------------
+VALUES_2, VALUES_3 = "e1a2b3c4d5e6f7a8b9c0", "f0e9d8c7b6a5f4e3d2c1"
+MEASURES = [{"table": "Spend Measures", "column": c, "label": c} for c in ("Cost", "Clicks", "CPC")]
+CAMPAIGN = {"table": "_Campaigns", "column": "Campaign Name", "label": "Campaign"}
+CHANNEL = {"table": "_Campaigns", "column": "Channel", "label": "Channel"}
+
+
+def _column(table: str, column: str) -> dict:
+    return {"Column": {"Expression": {"SourceRef": {"Entity": table}}, "Property": column}}
+
+
+def _values_slicer(table: str, column: str) -> dict:
+    """A captured slicer listing the values of one column, with a preselection."""
+    return {"singleVisual": {
+        "visualType": "slicer",
+        "projections": {"Values": [{**_column(table, column), "queryRef": f"{table}.{column}"}]},
+        "activeProjections": {"Values": [_column(table, column)]},
+        "objects": {"merge": {"general": [{"properties": {"filter": {"filter": {
+            "Version": 2,
+            "From": [{"Name": "i", "Entity": table, "Type": 0}],
+            "Where": [{"Condition": {"In": {
+                "Expressions": [{"Column": {"Expression": {"SourceRef": {"Source": "i"}},
+                                            "Property": column}}],
+                "Values": [[{"Literal": {"Value": "'Spring'"}}]]}}}]}}}}]}},
+    }, "filters": {"byExpr": [
+        {"name": "values_column", "expression": _column(table, column)},
+        {"name": "values_measure", "expression": {"Measure": {
+            "Expression": {"SourceRef": {"Entity": "Spend Measures"}}, "Property": "Cost"}}},
+    ]}}
+
+
+def _with_values_slicers(builder: Path, *, keys: dict[str, str], capture: tuple[str, ...]) -> None:
+    """Register ``keys`` (picker key -> visual id) and capture ``capture`` in the base."""
     toml = builder / "builder.toml"
+    extra = ", ".join(f'{k} = "{v}"' for k, v in keys.items())
     toml.write_text(toml.read_text(encoding="utf-8").replace(
-        'row_dropdowns = [', 'legacy_values_slicers = ["x_ps1", "x_ps2"]\nrow_dropdowns = ['),
-        encoding="utf-8")
-    measures = [{"table": "Spend Measures", "column": c, "label": c} for c in ("Cost", "Clicks", "CPC")]
-    row = [{"table": "_Campaigns", "column": "Campaign Name", "label": "Campaign"}]
-    cfg = _write_config(tmp_path, [{
-        "displayName": "Spend | Legacy sync", "analysis_category": "Spend",
-        "pickers": {"x_selector_1": measures, "y_selector_2": row}}])
-    result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP, "--legacy-layout")
+        'pickers = {', f"pickers = {{{extra}, "), encoding="utf-8")
+    base = _bookmarks_dir(builder) / f"{BASE_ID}.bookmark.json"
+    data = load(base)
+    containers = _section(data)["visualContainers"]
+    for vid in capture:
+        containers[vid] = _values_slicer("_Issues", "Issue Topic")
+    dump(base, data)
+
+
+def _legacy(builder: Path, tmp_path: Path, pickers: dict, *extra) -> dict:
+    cfg = _write_config(tmp_path, [{"displayName": "Spend | Legacy", "analysis_category": "Spend",
+                                    "pickers": pickers}])
+    result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP, "--legacy-layout", *extra)
     assert result.exit_code == 0, result.output
-    sec = _section(_by_display(builder)["Spend | Legacy sync"])
-    for key in ("x_ps1", "x_ps2"):
-        # cleared of the base pick, then synced to the axis's first pick
-        assert _picker_values(sec, PICKERS[key]) == [_literal(measures[0])], key
-        labels = [i["displayName"] for i in
-                  sec["visualContainers"][PICKERS[key]]["singleVisual"].get("cachedFilterDisplayItems") or []]
-        assert labels in ([], ["Cost"]), key
-    # a picker that is not a values slicer is still emptied
-    sv = sec["visualContainers"][PICKERS["x_selector_2"]]["singleVisual"]
-    assert _general_filter(sv)["Where"] == []
+    return result
 
 
-def test_legacy_values_slicers_must_be_known_pickers(builder, tmp_path):
-    toml = builder / "builder.toml"
-    toml.write_text(toml.read_text(encoding="utf-8").replace(
-        'row_dropdowns = [', 'legacy_values_slicers = ["nope"]\nrow_dropdowns = ['),
-        encoding="utf-8")
-    cfg = _write_config(tmp_path, [{"displayName": "Spend | X", "pickers": {}}])
+def _slicer(builder: Path, vid: str) -> dict:
+    return _section(_by_display(builder)["Spend | Legacy"])["visualContainers"][vid]
+
+
+def test_a_values_slicer_follows_its_dimension_pickers_first_pick(builder, tmp_path):
+    _with_values_slicers(builder, keys={"y_values_slicer_2": VALUES_2}, capture=(VALUES_2,))
+    _legacy(builder, tmp_path, {"x_selector_1": MEASURES, "y_selector_2": [CAMPAIGN, CHANNEL]})
+    slicer = _slicer(builder, VALUES_2)
+    single = slicer["singleVisual"]
+    assert _general_filter(single)["Where"] == []
+    first = single["projections"]["Values"][0]
+    assert first["Column"] == _column("_Campaigns", "Campaign Name")["Column"]
+    assert first["queryRef"] == "_Issues.Issue Topic"  # other properties are left alone
+    assert single["activeProjections"]["Values"][0] == _column("_Campaigns", "Campaign Name")
+    by_name = {f["name"]: f["expression"] for f in slicer["filters"]["byExpr"]}
+    assert by_name["values_column"] == _column("_Campaigns", "Campaign Name")
+    # never a measure: the measure entry is untouched and nothing points at Cost
+    assert by_name["values_measure"]["Measure"]["Property"] == "Cost"
+    assert "Spend Measures" not in json.dumps(single)
+
+
+def test_a_values_slicer_without_dimension_picks_is_only_cleared(builder, tmp_path):
+    # one row: it is mirrored into y_selector_3, and y_selector_4 is left with no pick
+    _with_values_slicers(builder, keys={"y_values_slicer_2": VALUES_2, "y_values_slicer_4": VALUES_3},
+                         capture=(VALUES_2, VALUES_3))
+    _legacy(builder, tmp_path, {"x_selector_1": MEASURES, "y_selector_2": [CAMPAIGN]})
+    untouched = _values_slicer("_Issues", "Issue Topic")["singleVisual"]
+    single = _slicer(builder, VALUES_3)["singleVisual"]
+    assert _general_filter(single)["Where"] == []
+    assert single["projections"] == untouched["projections"]
+    assert single["activeProjections"] == untouched["activeProjections"]
+
+
+def test_values_slicer_keys_are_not_pickers(builder, tmp_path):
+    _with_values_slicers(builder, keys={"y_values_slicer_2": VALUES_2}, capture=(VALUES_2,))
+    cfg = _write_config(tmp_path, [{"displayName": "Spend | Legacy", "pickers": {
+        "x_selector_1": MEASURES, "y_selector_2": [CAMPAIGN], "y_values_slicer_2": [CHANNEL]}}])
     result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP, "--legacy-layout")
     assert result.exit_code == 2
-    assert "legacy_values_slicers" in result.output
+    assert "y_values_slicer_2" in result.output
+
+
+def test_a_missing_values_slicer_visual_or_key_is_skipped(builder, tmp_path):
+    # key registered but not captured in the base; y_values_slicer_3 not registered at all
+    _with_values_slicers(builder, keys={"y_values_slicer_2": VALUES_2}, capture=())
+    _legacy(builder, tmp_path, {"x_selector_1": MEASURES, "y_selector_2": [CAMPAIGN],
+                                "y_selector_3": [CHANNEL]})
+    containers = _section(_by_display(builder)["Spend | Legacy"])["visualContainers"]
+    assert VALUES_2 not in containers
+
+
+def test_values_slicers_are_untouched_outside_the_legacy_layout(builder, tmp_path):
+    _with_values_slicers(builder, keys={"y_values_slicer_2": VALUES_2}, capture=(VALUES_2,))
+    cfg = _write_config(tmp_path, [{"displayName": "Spend | Legacy",
+                                    "pickers": {"y_selector_2": [CAMPAIGN]}}])
+    assert _build(builder, cfg, "--base", BASE_ID, "--group", GROUP).exit_code == 0
+    assert _slicer(builder, VALUES_2) == _values_slicer("_Issues", "Issue Topic")
+
+
+def test_a_legacy_rerender_keeps_bom_and_crlf(builder, tmp_path):
+    _with_values_slicers(builder, keys={"y_values_slicer_2": VALUES_2}, capture=(VALUES_2,))
+    pickers = {"x_selector_1": MEASURES, "y_selector_2": [CAMPAIGN]}
+    _legacy(builder, tmp_path, pickers)
+    built = next(p for p in _bookmarks_dir(builder).glob("*.bookmark.json")
+                 if load(p)["displayName"] == "Spend | Legacy")
+    text = built.read_bytes().decode("utf-8").replace("\n", "\r\n")
+    built.write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
+    _legacy(builder, tmp_path, pickers, "--keep-ids")
+    raw = built.read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf")
+    assert b"\n" not in raw.replace(b"\r\n", b"")
+    single = json.loads(raw.decode("utf-8-sig"))
+    section = _section(single)["visualContainers"][VALUES_2]["singleVisual"]
+    assert _general_filter(section)["Where"] == []
+
+
+def test_a_legacy_dry_run_writes_nothing(builder, tmp_path):
+    _with_values_slicers(builder, keys={"y_values_slicer_2": VALUES_2}, capture=(VALUES_2,))
+    before = _files_snapshot(builder)
+    _legacy(builder, tmp_path, {"x_selector_1": MEASURES, "y_selector_2": [CAMPAIGN]}, "--dry-run")
+    assert _files_snapshot(builder) == before

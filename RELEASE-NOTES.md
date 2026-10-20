@@ -145,10 +145,14 @@
   dropdowns (previously any explicit dropdown stopped all mirroring), and a
   dropdown that receives no row is emptied instead of keeping the base
   bookmark's pick, so the dropdowns hold exactly the rows (no `ABK010`).
-- `bookmarks build --legacy-layout` syncs the values slicers: pickers listed
-  in the new `[bookmarks] legacy_values_slicers` setting are cleared and then
-  set to the first pick of the `legacy_measures` picker, instead of being
-  left empty.
+- `bookmarks build --legacy-layout` handles the values slicers: the
+  `[bookmarks] pickers` key `y_values_slicer_<N>` (N = 2..6) names the slicer
+  that lists the values of the dimension picked in `y_selector_<N>`. Its
+  preselection is always cleared, and when `y_selector_<N>` has picks its
+  column (first `Values` projection, first active `Values` entry and every
+  column `filters.byExpr` expression) becomes that picker's first pick. A
+  values slicer is never a picker (an entry cannot pick it) and never holds
+  a measure; one the base bookmark does not capture is skipped.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and
@@ -176,8 +180,7 @@
   lists the pickers of each well (the example fixture maps the matrix values
   to one picker, because its entries pick the same measure in two pickers of
   that well). Pickers an entry does not mention keep the base bookmark's
-  selection. The legacy layout empties unmentioned pickers and re-syncs only
-  the values slicers named in `legacy_values_slicers`.
+  selection. The legacy layout empties unmentioned pickers.
 
 ## v1.1.0, 2026-10-12
 

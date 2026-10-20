@@ -69,11 +69,26 @@ class BuilderSettings:
     wells: dict[str, tuple[str, ...]] = field(default_factory=dict)
     #: Legacy layout: the picker whose picks fill the matrix Values well.
     legacy_measures: str = "x_selector_1"
-    #: Legacy layout: pickers emptied and then set to the first measure pick.
-    legacy_values_slicers: tuple[str, ...] = ()
 
     def well(self, key: str) -> tuple[str, ...]:
         return self.wells.get(key, ())
+
+    @property
+    def values_slicers(self) -> dict[str, str]:
+        """values-slicer key -> the key of the dimension picker it lists.
+
+        ``y_values_slicer_<N>`` lists the values of the dimension chosen in
+        ``y_selector_<N>`` (N = 2..6; axis 1 has none). Only keys present in
+        ``pickers`` count.
+        """
+        return {f"y_values_slicer_{n}": f"y_selector_{n}" for n in range(2, 7)
+                if f"y_values_slicer_{n}" in self.pickers}
+
+    @property
+    def picker_keys(self) -> tuple[str, ...]:
+        """The keys of ``pickers`` that are real pickers (not values slicers)."""
+        skip = self.values_slicers
+        return tuple(k for k in self.pickers if k not in skip)
 
 
 def load_builder_settings(path: Path | None) -> BuilderSettings:
@@ -90,9 +105,8 @@ def load_builder_settings(path: Path | None) -> BuilderSettings:
         raise BuildError(f"{path} has unknown key(s) under [bookmarks]: "
                          f"{', '.join(sorted(unknown))}")
     values = dict(body)
-    for key in ("row_dropdowns", "legacy_values_slicers"):
-        if key in values:
-            values[key] = tuple(values[key])
+    if "row_dropdowns" in values:
+        values["row_dropdowns"] = tuple(values["row_dropdowns"])
     if "pickers" in values:
         values["pickers"] = dict(values["pickers"])
     if "wells" in values:
@@ -101,12 +115,7 @@ def load_builder_settings(path: Path | None) -> BuilderSettings:
             raise BuildError(f"[bookmarks] wells has unknown key(s) {sorted(unknown_wells)}; "
                              f"valid keys: {', '.join(_WELL_KEYS)}")
         values["wells"] = {k: tuple(v) for k, v in values["wells"].items()}
-    settings = BuilderSettings(**values)
-    stray = [k for k in settings.legacy_values_slicers if k not in settings.pickers]
-    if stray:
-        raise BuildError(f"[bookmarks] legacy_values_slicers names unknown picker(s) "
-                         f"{stray}; list keys of [bookmarks] pickers")
-    return settings
+    return BuilderSettings(**values)
 
 
 # -- small builders -----------------------------------------------------------------
@@ -208,6 +217,9 @@ class Builder:
         if not isinstance(pickers, dict):
             raise BuildError(f"{display!r}: 'pickers' must map picker keys to lists of picks")
         for key in pickers:
+            if key in self.settings.values_slicers:
+                raise BuildError(f"{display!r}: {key!r} is a values slicer, not a picker; "
+                                 f"pick the dimension in {self.settings.values_slicers[key]!r}")
             if key not in self.settings.pickers:
                 raise BuildError(f"{display!r}: picker {key!r} is not in [bookmarks] pickers")
         picks = {
@@ -252,20 +264,18 @@ class Builder:
             self._legacy_checks(display, picks)
         effective = {
             key: picks[key] if key in picks else self._base_picks(containers, key)
-            for key in self.settings.pickers
+            for key in self.settings.picker_keys
         }
         if entry.get("unhide_matrix", True):
             self._matrix(display, containers, effective, entry.get("matrix_sort"))
         self._chart(display, containers, effective, mentioned)
-        axis = picks.get(self.settings.legacy_measures) or []
-        for key in self.settings.pickers:
+        for key in self.settings.picker_keys:
             if picks.get(key):
                 self._set_picker(display, containers, key, picks[key])
-            elif self.legacy and key in self.settings.legacy_values_slicers and axis:
-                # cleared of whatever the base held, then synced to the axis
-                self._set_picker(display, containers, key, axis[:1])
             elif key in picks or self.legacy:
                 self._empty_picker(containers, key)
+        if self.legacy:
+            self._sync_values_slicers(containers, picks)
         if rerendered:
             for flt_name in entry.get("clear_filters") or []:
                 for holder in (state, section):
@@ -459,6 +469,36 @@ class Builder:
                 item["displayName"] = pick.get("label", pick["column"])
                 items.append(item)
             single["cachedFilterDisplayItems"] = items
+
+    def _sync_values_slicers(self, containers: dict, picks: dict) -> None:
+        """Legacy layout: clear each values slicer, then point it at its dimension.
+
+        The slicer's preselection is always dropped. When the paired
+        dimension picker has picks, the slicer's column (first ``Values``
+        projection, first active ``Values`` entry, and every column-valued
+        ``filters.byExpr`` expression) becomes that picker's first pick. A
+        slicer the base bookmark does not capture is skipped.
+        """
+        for key, dimension in self.settings.values_slicers.items():
+            container = containers.get(self.settings.pickers[key])
+            if not isinstance(container, dict):
+                continue
+            flt = slicer_filter(container)
+            if flt is not None:
+                flt["Where"] = []
+            chosen = picks.get(dimension) or []
+            if not chosen:
+                continue
+            column = _ref("Column", chosen[0]["table"], chosen[0]["column"])["Column"]
+            single = container.get("singleVisual") if isinstance(
+                container.get("singleVisual"), dict) else {}
+            firsts = [dig(single, "projections", "Values", 0),
+                      dig(single, "activeProjections", "Values", 0)]
+            firsts += [flt.get("expression") for flt in dig(container, "filters", "byExpr") or []
+                       if isinstance(flt, dict)]
+            for node in firsts:
+                if isinstance(node, dict) and isinstance(node.get("Column"), dict):
+                    node["Column"] = copy.deepcopy(column)
 
     def _empty_picker(self, containers: dict, key: str) -> None:
         container = containers.get(self.settings.pickers.get(key, ""))
