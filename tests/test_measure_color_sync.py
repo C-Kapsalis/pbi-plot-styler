@@ -125,3 +125,33 @@ def test_unresolvable_bare_reference_is_invalid(shop):
 
 def test_missing_palette_measure_is_invalid(shop):
     assert run("colors", "sync", *_args(shop), "--measure", "c-Nope").exit_code == EXIT_INVALID
+
+
+def _set_slot_expression(shop: Path, expression: str) -> None:
+    palette = shop / "Shop.SemanticModel" / "definition" / "tables" / "w-Colors.tmdl"
+    palette.write_text(palette.read_text(encoding="utf-8").replace(
+        "MOD ( _order + 0, 3 )", expression), encoding="utf-8")
+
+
+def test_a_negative_offset_shifts_every_colour_by_one_slot(shop):
+    _set_slot_expression(shop, "MOD ( _order - 1, 3 )")
+    assert run("colors", "sync", *_args(shop), "--apply").exit_code == EXIT_CHANGES
+    data_point = _visual(shop, "combo01")["visual"]["objects"]["dataPoint"]
+    assert _fill(_entry(data_point, "Sales Measures.Revenue")) == {"Literal": {"Value": "'#111111'"}}
+    assert _fill(_entry(data_point, "Sales Measures.Orders")) == {"Literal": {"Value": "'#222222'"}}
+
+
+def test_a_positive_offset_is_read_too(shop):
+    _set_slot_expression(shop, "MOD ( _order + 2, 3 )")
+    assert run("colors", "sync", *_args(shop), "--apply").exit_code == EXIT_CHANGES
+    data_point = _visual(shop, "combo01")["visual"]["objects"]["dataPoint"]
+    assert _fill(_entry(data_point, "Sales Measures.Revenue")) == {"Literal": {"Value": "'#111111'"}}
+
+
+def test_a_slot_expression_it_cannot_read_is_rejected(shop):
+    _set_slot_expression(shop, "MOD ( _order * 2, 3 )")
+    before = _snapshot(shop)
+    result = run("colors", "sync", *_args(shop), "--apply")
+    assert result.exit_code == EXIT_INVALID, result.output
+    assert "offset" in result.output
+    assert _snapshot(shop) == before

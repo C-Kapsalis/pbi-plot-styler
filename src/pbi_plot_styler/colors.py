@@ -64,9 +64,11 @@ class Palette:
 _DECL = r"^(?P<indent>[ \t]+)measure\s+(?:'{q}'|\"{d}\"|{b})\s*="
 _NEXT_OBJECT = re.compile(r"^[ \t]+(?:measure|partition|column)\b", re.MULTILINE)
 _PICKER = re.compile(r"SELECTEDVALUE\s*\(\s*(?:'((?:[^']|'')+)'|([A-Za-z_][\w \-]*?))\s*\[")
-_MOD = re.compile(
-    r"MOD\s*\(\s*[^,()]+?(?:\+\s*(-?\d+)\s*)?,\s*(\d+)\s*\)\s*\+\s*(-?\d+)", re.IGNORECASE
-)
+#: ``MOD ( <first argument>, <modulus> ) + <base>``; the first argument is
+#: then read by :data:`_ORDER_TERM`.
+_MOD = re.compile(r"MOD\s*\(\s*([^,()]+?)\s*,\s*(\d+)\s*\)\s*\+\s*(-?\d+)", re.IGNORECASE)
+#: ``<variable>``, ``<variable> + n`` or ``<variable> - n``.
+_ORDER_TERM = re.compile(r"[A-Za-z_][\w.]*(?:\s*([+-])\s*(\d+))?")
 _SLOT = re.compile(r"(\d+)\s*,\s*\"(#[0-9A-Fa-f]{6})\"")
 
 
@@ -93,7 +95,14 @@ def parse_palette(model: SemanticModel, measure: str, host: str) -> Palette:
     mod = _MOD.search(body)
     if not mod:
         raise PaletteError(f"[{measure}] has no MOD(<order> + offset, modulus) + base")
-    offset, modulus, base = int(mod.group(1) or 0), int(mod.group(2)), int(mod.group(3))
+    term = _ORDER_TERM.fullmatch(mod.group(1).strip())
+    if not term:
+        raise PaletteError(
+            f"[{measure}]: cannot read the slot offset from MOD({mod.group(1).strip()}, ...); "
+            f"write the first argument as <order>, <order> + n or <order> - n")
+    sign, amount = term.groups()
+    offset = int(amount or 0) * (-1 if sign == "-" else 1)
+    modulus, base = int(mod.group(2)), int(mod.group(3))
     slots = {int(n): colour.lower() for n, colour in _SLOT.findall(body)}
     if modulus <= 0 or len(slots) != modulus:
         raise PaletteError(

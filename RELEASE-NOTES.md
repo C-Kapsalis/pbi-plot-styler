@@ -133,6 +133,10 @@
 - `colors sync` / `colors reset` exit codes follow the other commands: `0`
   written or nothing to do, `1` a dry run found changes, `2` invalid input
   (previously `2` meant "no changes" and `3` invalid input).
+- `colors` reads a palette offset written with a minus sign
+  (`MOD ( _order - 1, n )`); it was read as offset 0, shifting every colour.
+  A first `MOD` argument other than `<order>`, `<order> + n` or
+  `<order> - n` is now rejected with exit `2`.
 
 ### Notes on choices made where the specs left room
 
