@@ -94,6 +94,15 @@
   unknown section is still an error.
 - A missing `--baseline` file stays a usage error (exit `2`).
 
+### Fixed
+
+- `rename-measure` no longer renames the `queryRef`, `nativeQueryRef` or
+  label of a column projection whose column shares the measure's name.
+- `rename-measure` finds and writes names with an apostrophe or a closing
+  bracket inside saved selection literals in their escaped form.
+- `rename-measure` keeps each rewritten file's byte-order mark and line
+  endings (CRLF stays CRLF).
+
 ### Notes on choices made where the specs left room
 
 - The convention rules run only when named with `--rule`; a bare `check`

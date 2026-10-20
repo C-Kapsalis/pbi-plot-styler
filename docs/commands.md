@@ -105,7 +105,9 @@ in the name, `nativeQueryRef`, and each `[name]` inside saved selection
 literals. Labels follow only while they still equal the old label
 (`--label-from` / `--label-to`) and a sibling binds the measure: cached
 display items, projection labels and value maps. `Column` bindings are never
-touched. The dry-run count equals the number of rewrites. The model side
+touched, and neither are the references or label of a column projection that
+shares the measure's name. Names with `'` or `]` are matched and written in
+their escaped literal form, and each file keeps its BOM and line endings. The dry-run count equals the number of rewrites. The model side
 (declaration, DAX) is not edited. The same functions are importable from
 `pbi_plot_styler.rename` (`report_roots`, `count_tree`, `rewrite_tree`,
 `count_measure_refs`, `rename_measure`).

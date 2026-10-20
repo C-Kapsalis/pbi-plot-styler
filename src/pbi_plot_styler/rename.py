@@ -34,7 +34,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
+
+from .textio import Layout, decode, dump_json
 
 Edit = Callable[[], None]
 
@@ -46,7 +48,8 @@ class _Matcher:
         self.old = old
         self.old_folded = old.casefold()
         self.label_folded = (old_label if old_label is not None else old).casefold()
-        self.bracketed = re.compile(r"\[" + re.escape(old) + r"\]", re.IGNORECASE)
+        self.bracketed = re.compile(
+            r"\[" + re.escape(literal_name(old)) + r"\]", re.IGNORECASE)
 
     def is_old(self, value: Any) -> bool:
         return isinstance(value, str) and value.casefold() == self.old_folded
@@ -77,6 +80,16 @@ class _Matcher:
             elif isinstance(current, list):
                 stack.extend(current)
         return False
+
+
+def literal_name(name: str) -> str:
+    """``name`` as it is spelled between brackets inside a selection literal.
+
+    A closing bracket is doubled (DAX bracket escaping) and an apostrophe is
+    written four times: once doubled for the quoted DAX reference, and that
+    pair doubled again for the quoted literal string that carries it.
+    """
+    return name.replace("]", "]]").replace("'", "'" * 4)
 
 
 def _literal_text(node: dict) -> str | None:
@@ -112,12 +125,25 @@ def _setter(target: dict, key: str, value: Any) -> Edit:
     return apply
 
 
+def _binds_something_else(obj: dict) -> bool:
+    """Whether ``obj`` is a projection whose ``field`` is not a measure.
+
+    A column (or hierarchy level, or aggregated column) can share the
+    measure's name; its references and label then belong to the column.
+    """
+    field = obj.get("field")
+    return isinstance(field, dict) and bool(field) and "Measure" not in field
+
+
 def _plan_object(obj: dict, m: _Matcher, new: str, new_label: str) -> list[Edit]:
     edits: list[Edit] = []
 
     measure = obj.get("Measure")
     if isinstance(measure, dict) and m.is_old(measure.get("Property")):
         edits.append(_setter(measure, "Property", new))
+
+    if _binds_something_else(obj):
+        return edits
 
     for key in ("queryRef", "metadata"):
         value = obj.get(key)
@@ -130,7 +156,8 @@ def _plan_object(obj: dict, m: _Matcher, new: str, new_label: str) -> list[Edit]
     text = _literal_text(obj)
     hits = len(m.bracketed.findall(text)) if text is not None else 0
     if hits:
-        rewritten = m.bracketed.sub(lambda _: f"[{new}]", text)
+        spelled = literal_name(new)
+        rewritten = m.bracketed.sub(lambda _: f"[{spelled}]", text)
         edits.append(_setter(obj["Literal"], "Value", rewritten))
         # One edit per occurrence, so the count matches the rewrite.
         edits.extend(lambda: None for _ in range(hits - 1))
@@ -195,24 +222,33 @@ def report_files(root: Path) -> list[Path]:
     return visuals + bookmarks
 
 
-def _load(path: Path) -> Any:
-    try:
-        return json.loads(path.read_bytes().decode("utf-8-sig"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
+def _scan(
+    roots: Iterable[Path], plan: Callable[[Any], int]
+) -> Iterator[tuple[Path, bytes, Any, int]]:
+    """Visit every report file once, yielding ``(path, raw, document, hits)``.
+
+    ``plan`` runs on the parsed document and returns its hit count (it may
+    change the document in place). Files without hits are not yielded;
+    unreadable files are passed over.
+    """
+    for root in roots:
+        for path in report_files(root):
+            try:
+                raw = path.read_bytes()
+                data = json.loads(decode(raw))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            hits = plan(data)
+            if hits:
+                yield path, raw, data, hits
 
 
 def count_measure_refs(
     roots: Iterable[Path], old: str, old_label: str | None = None
 ) -> int:
     """Total references to ``old`` across the report roots (read-only)."""
-    total = 0
-    for root in roots:
-        for path in report_files(root):
-            data = _load(path)
-            if data is not None:
-                total += count_tree(data, old, old_label)
-    return total
+    found = _scan(roots, lambda doc: count_tree(doc, old, old_label))
+    return sum(hits for *_, hits in found)
 
 
 def rename_measure(
@@ -227,25 +263,20 @@ def rename_measure(
 ) -> int:
     """Rewrite every reference to ``old`` across the report roots.
 
-    Changed files are written back as 2-space JSON with a final newline;
-    ``backup`` (if given) is called with each path before it is rewritten.
-    Returns the total number of references rewritten.
+    Changed files are written back as 2-space JSON that keeps the file's
+    byte-order mark and line endings; ``backup`` (if given) is called with
+    each path before it is rewritten. Returns the number of references
+    rewritten.
     """
+    def rename(doc: Any) -> int:
+        return rewrite_tree(doc, old, new, old_label, new_label)
+
     total = 0
-    for root in roots:
-        for path in report_files(root):
-            data = _load(path)
-            if data is None:
-                continue
-            hits = rewrite_tree(data, old, new, old_label, new_label)
-            if not hits:
-                continue
-            if backup is not None:
-                backup(path)
-            path.write_bytes(
-                (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-            )
-            total += hits
-            if on_file is not None:
-                on_file(path, hits)
+    for path, raw, data, hits in _scan(roots, rename):
+        if backup is not None:
+            backup(path)
+        path.write_bytes(Layout.of(raw).encode(dump_json(data)))
+        total += hits
+        if on_file is not None:
+            on_file(path, hits)
     return total
