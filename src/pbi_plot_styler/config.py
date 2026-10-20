@@ -9,6 +9,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Union
+from .textio import load_toml
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -286,7 +287,7 @@ def _reject_unknown_keys(
 def load_config_file(path: Path) -> dict[str, Any]:
     """Read a plotstyler.toml file into a flat override dict."""
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        raw = load_toml(path)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(
             f"{path} is not valid TOML: {exc}. Fix the syntax and rerun."

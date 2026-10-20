@@ -41,6 +41,7 @@ from typing import Iterable, Iterator, Mapping
 
 from .config import Color, StylerConfig, ThemeColor
 from .tmdl import SemanticModel
+from .textio import BOM, decode, load_json
 
 JSON_INDENT = 2
 
@@ -479,7 +480,7 @@ def resolve_model_dir(report_dir: Path) -> Path:
             f"model cannot be resolved. Pass the model folder explicitly "
             f"with --model."
         )
-    meta = json.loads(pbir.read_text(encoding="utf-8"))
+    meta = load_json(pbir)
     rel = ((meta.get("datasetReference") or {}).get("byPath") or {}).get("path")
     if not rel:
         raise FileNotFoundError(
@@ -524,6 +525,7 @@ class VisualChange:
     old_text: str
     new_text: str
     rebinds: tuple[Rebind, ...] = ()
+    bom: bool = False
 
     @property
     def changed(self) -> bool:
@@ -582,7 +584,8 @@ def plan_changes(
     for visual_file in iter_visual_files(report_dir):
         # Read raw bytes so change detection is byte-accurate (no newline
         # translation on Windows).
-        old_text = visual_file.read_bytes().decode("utf-8")
+        raw = visual_file.read_bytes()
+        old_text = decode(raw)
         try:
             data = json.loads(old_text)
         except json.JSONDecodeError:
@@ -610,7 +613,7 @@ def plan_changes(
             )
         changes.append(
             VisualChange(path=visual_file, old_text=old_text, new_text=new_text,
-                         rebinds=tuple(rebinds))
+                         rebinds=tuple(rebinds), bom=raw.startswith(BOM))
         )
     return changes
 
@@ -623,7 +626,8 @@ def apply_changes(changes: list[VisualChange]) -> int:
             # write_bytes, not write_text: text mode would rewrite every
             # line ending to os.linesep (CRLF on Windows), churning bytes
             # far outside the owned entries.
-            change.path.write_bytes(change.new_text.encode("utf-8"))
+            change.path.write_bytes(
+                (BOM if change.bom else b"") + change.new_text.encode("utf-8"))
             written += 1
     return written
 

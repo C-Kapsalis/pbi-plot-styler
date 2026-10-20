@@ -16,6 +16,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from .textio import read_text
 
 
 class LabelRenameError(RuntimeError):
@@ -44,7 +45,7 @@ def label_files(client_dir: Path, patterns: tuple[str, ...] = ("x-*",)) -> list[
     files: list[Path] = []
     for model in sorted(client_dir.glob("*.SemanticModel")):
         for tmdl in sorted((model / "definition" / "tables").glob("*.tmdl")):
-            name = _table_name(tmdl, tmdl.read_text(encoding="utf-8"))
+            name = _table_name(tmdl, read_text(tmdl))
             if any(fnmatch.fnmatchcase(name, p) for p in patterns):
                 files.append(tmdl)
     for report in sorted(p for p in client_dir.rglob("*.Report") if p.is_dir()):

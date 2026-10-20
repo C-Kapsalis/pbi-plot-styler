@@ -35,6 +35,7 @@ from typing import Any
 
 from . import qx
 from .canvas import dig, first_in_condition, read_json, selections, slicer_filter
+from .textio import Layout, load_json, load_toml
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -77,7 +78,7 @@ def load_builder_settings(path: Path | None) -> BuilderSettings:
     if path is None or not Path(path).is_file():
         return BuilderSettings()
     try:
-        raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        raw = load_toml(Path(path))
     except tomllib.TOMLDecodeError as exc:
         raise BuildError(f"{path} is not valid TOML: {exc}") from exc
     body = raw.get("bookmarks") or {}
@@ -444,8 +445,8 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
                     keep_ids: bool = False, legacy: bool = False,
                     dry_run: bool = False) -> BuildResult:
     try:
-        entries = json.loads(entries_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        entries = load_json(entries_path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BuildError(f"{entries_path} is not a JSON list of entries: {exc}") from exc
     if not isinstance(entries, list):
         raise BuildError(f"{entries_path} must hold a JSON list of entries")
@@ -476,7 +477,7 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
         return BuildResult([builder.dir / f"{b.name}.bookmark.json" for b in built], registered)
     for item in built:
         path = builder.dir / f"{item.name}.bookmark.json"
-        path.write_bytes((json.dumps(item.data, indent=2) + "\n").encode("utf-8"))
+        path.write_bytes(Layout.of_file(path).encode(json.dumps(item.data, indent=2)))
         written.append(path)
     if index is not None and registered:
         from .rules import rewrite_json

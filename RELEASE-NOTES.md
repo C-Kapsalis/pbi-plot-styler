@@ -102,6 +102,14 @@
   bracket inside saved selection literals in their escaped form.
 - `rename-measure` keeps each rewritten file's byte-order mark and line
   endings (CRLF stays CRLF).
+- Files saved on Windows: every file the tool reads (`definition.pbir`,
+  `visual.json`, bookmarks, TMDL, `plotstyler.toml`, builder configs, the
+  `bookmarks build` entries file, `--only-display-names`, baselines) is
+  accepted with or without a UTF-8 byte-order mark and with CRLF or LF.
+  Every writer keeps the existing file's BOM and line endings, including
+  `style`, the `check --fix` fixers and `bookmarks build --keep-ids`.
+  Previously a BOM in `definition.pbir` made the model unresolvable and a
+  BOM in `visual.json` made `style` skip the visual.
 
 ### Notes on choices made where the specs left room
 

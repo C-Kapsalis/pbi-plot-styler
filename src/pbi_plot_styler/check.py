@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .tmdl import SemanticModel
+from .textio import load_json
 
 #: id -> (severity, short title)
 CHECKS: dict[str, tuple[str, str]] = {
@@ -705,7 +706,7 @@ BASELINE_VERSION = 1
 
 
 def load_baseline(path: Path) -> set[tuple[str, str]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = load_json(path)
     if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
         raise ValueError(
             f"{path} is not a pbi-plot-styler baseline (expected an object "

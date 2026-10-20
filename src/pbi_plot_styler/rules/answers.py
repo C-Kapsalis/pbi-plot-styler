@@ -45,6 +45,7 @@ from ..canvas import (
     slicer_selector_tables,
 )
 from . import RuleContext, RuleError
+from ..textio import load_json
 
 
 # -- scope ------------------------------------------------------------------------
@@ -397,7 +398,7 @@ def check_bookmark_literals(ctx: RuleContext) -> None:
 
 
 def load_display_name_filter(path: Path) -> set[str]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = load_json(path)
     if not isinstance(data, list) or not all(isinstance(x, str) for x in data):
         raise ValueError(f"{path} must hold a JSON list of bookmark display names")
     return set(data)

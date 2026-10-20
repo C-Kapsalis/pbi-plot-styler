@@ -22,6 +22,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+from .textio import Layout, dump_json, load_toml
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -222,7 +223,7 @@ def load_settings(path: Path | None) -> Settings:
     if path is None:
         return Settings()
     try:
-        raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        raw = load_toml(Path(path))
     except tomllib.TOMLDecodeError as exc:
         raise SettingsError(f"{path} is not valid TOML: {exc}.") from exc
     return settings_from_mapping(raw, str(path))
@@ -238,11 +239,13 @@ def read_json(path: Path) -> Any:
 
 
 def write_json(path: Path, data: Any, *, trailing_newline: bool = True) -> None:
-    """Write ``data`` as 2-space JSON (LF line endings)."""
-    text = json.dumps(data, indent=2, ensure_ascii=False)
-    if trailing_newline:
-        text += "\n"
-    path.write_bytes(text.encode("utf-8"))
+    """Write ``data`` as 2-space JSON.
+
+    An existing file keeps its BOM, line endings and final newline; a new
+    file is written with LF endings and ``trailing_newline``.
+    """
+    layout = Layout.of_file(path) if path.exists() else Layout(final_newline=trailing_newline)
+    path.write_bytes(layout.encode(dump_json(data)))
 
 
 def dig(node: Any, *keys: Any) -> Any:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from .textio import read_text
 
 # `table <name>` at the top of a .tmdl file. Single-quoted names may embed
 # doubled quotes; bare names run to end of line.
@@ -169,7 +170,7 @@ class SemanticModel:
 
         model = cls(definition_dir=definition)
         for tmdl_file in sorted(tables_dir.glob("*.tmdl")):
-            content = tmdl_file.read_text(encoding="utf-8")
+            content = read_text(tmdl_file)
             match = _TABLE_DECL.search(content)
             table_name = (
                 _unquote(match.group(1), match.group(2), match.group(3))
