@@ -377,6 +377,21 @@ def load_config_file(path: Path) -> dict[str, Any]:
     return overrides
 
 
+def config_field_parameter_tables(config_path: Path | None) -> tuple[str, ...]:
+    """The field-parameter tables the config file lists, if any.
+
+    An empty tuple means the file does not name any: the tool then detects
+    the model's field parameters from its TMDL.
+    """
+    if config_path is None or not Path(config_path).is_file():
+        return ()
+    try:
+        raw = load_config_file(Path(config_path))
+    except ConfigError:
+        return ()
+    return tuple(raw.get("field_parameter_tables") or ())
+
+
 def build_config(
     config_path: Path | None = None,
     table_renames: dict[str, str] | None = None,

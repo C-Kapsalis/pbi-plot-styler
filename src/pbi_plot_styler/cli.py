@@ -28,7 +28,9 @@ from .check import (
     write_baseline,
 )
 from .canvas import Settings, SettingsError, load_settings
-from .config import DEFAULT_CONFIG_FILENAME, ConfigError, build_config
+from .config import (DEFAULT_CONFIG_FILENAME, ConfigError, build_config,
+                     config_field_parameter_tables)
+from .fieldparams import detect_field_parameters
 from .report import (
     RestyleInvariantError,
     VisualChange,
@@ -316,6 +318,11 @@ def style(
                 f"For example: --rename-table \"y-Plot Specific=Set Lines\"."
             )
         table_renames[name.strip()] = new_name.strip()
+    # The field-parameter set is the EXPLICIT list when the user gives one
+    # (the `--table` option or the config's tables); otherwise the model's
+    # own field parameters are detected from its TMDL.
+    explicit_tables = bool(tables) or bool(config_field_parameter_tables(
+        config_path))
     pins = _parse_pairs(
         color_pins, "--color", '"Sales Measures.Revenue=#7A4419"'
     )
@@ -376,7 +383,30 @@ def style(
             if resolved_model not in models:
                 models[resolved_model] = SemanticModel.load(resolved_model)
             model = models[resolved_model]
-            tables = _expand_tables(config.field_parameter_tables, model)
+            detected = detect_field_parameters(model.raw_by_table,
+                                               model.measures_by_table)
+            if explicit_tables:
+                # the user's list: the expansion is restricted as in the
+                # original
+                tables = _expand_tables(config.field_parameter_tables, model)
+                field_parameters = tables
+                click.echo(f"Field parameters: {', '.join(tables)} (explicit)")
+            else:
+                # no explicit list: the model's own field parameters are
+                # detected from its TMDL. The measures the styling drives
+                # come from the METRIC parameters (the ones whose rows
+                # point at measures); the column wells and the excluded
+                # roles work on the DIMENSION ones (the ones whose rows
+                # point at columns).
+                tables = (tuple(p.name for p in detected.metric)
+                          or tuple(detected.names))
+                field_parameters = tuple(detected.names)
+                if detected.parameters:
+                    click.echo(
+                        f"Field parameters: {', '.join(detected.names)}"
+                        + (f" (dimension: {', '.join(detected.dimension_names)}; "
+                           f"metric: {', '.join(detected.metric_names)})"
+                           if detected.metric or detected.mixed else ""))
             measure_keys = model.field_parameter_measures(tables) if tables else []
         except (FileNotFoundError, LookupError, OSError, ValueError) as exc:
             skip_or_fail(report, str(exc))
@@ -401,7 +431,7 @@ def style(
         # (v1.1.0 behaviour), not only the configured or matched tables
         catalogs = {
             table: [e.key for e in model.parameter_catalog(table)]
-            for table in model.raw_by_table
+            for table in (field_parameters or model.raw_by_table)
         }
         try:
             changes.extend(

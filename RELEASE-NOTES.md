@@ -81,6 +81,27 @@
 
 ### Changed
 
+- **The field parameters are detected from the model, not from their names.**
+  With no `--table` and no `[tables] field_parameters` in the config, the
+  tool detects the model's field parameters from its TMDL: a calculated
+  table whose column carries `extendedProperty ParameterMetadata` and whose
+  rows are `NAMEOF(...)` tuples. A parameter called `Bar Metrics` is in the
+  set; a table called `x-Selector 1` that carries no parameter metadata is
+  not. The name patterns (`x-*`, `y-*`) only rank and label the detected
+  tables; they never replace the detection.
+
+  Each detected parameter is classified by what its rows point at: columns
+  make a **dimension** parameter, measures make a **metric** one, and a mix
+  is flagged. The measures the styling drives come from the metric
+  parameters; the column wells and the excluded roles work on the whole
+  detected set, so a Y role bound through a parameter the user did not
+  configure still excludes that parameter's whole catalog (the v1.1.0
+  behaviour). An explicit `--table` or config list still restricts the
+  expansion, as in the original.
+
+  The command prints one line naming the tables it uses:
+  `Field parameters: <names> (dimension: ...; metric: ...)`, or
+  `Field parameters: <names> (explicit)` when the list was given.
 - **STRICTER: `FPM001` reports more overlaps.** A parameter that claims a
   slot it already claimed is now a finding; each claim is paired with the
   most recent earlier claimant of the slot (a third claimant is paired with
