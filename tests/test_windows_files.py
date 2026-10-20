@@ -121,7 +121,7 @@ def test_bom_entries_and_bom_builder_config_are_accepted(tmp_path):
     result = run("bookmarks", "build", entries, "--report", builder / "Newsletter.Report",
                  "--config", config, "--dry-run")
     assert result.exit_code == 0, result.output
-    assert "1 bookmark(s) built (dry run)." in result.output
+    assert result.output.startswith("would write ") and result.output.count("\n") == 1
 
 
 def test_bom_visual_is_styled_and_keeps_its_bom(tmp_path):
