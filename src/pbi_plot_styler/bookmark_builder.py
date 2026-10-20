@@ -245,9 +245,9 @@ class Builder:
             self._matrix(display, containers, effective, entry.get("matrix_sort"))
         self._chart(display, containers, effective, mentioned)
         for key in self.settings.pickers:
-            if key in picks:
+            if picks.get(key):
                 self._set_picker(display, containers, key, picks[key])
-            elif self.legacy:
+            elif key in picks or self.legacy:
                 self._empty_picker(containers, key)
         if rerendered:
             for flt_name in entry.get("clear_filters") or []:
@@ -308,15 +308,25 @@ class Builder:
         return containers[vid]
 
     def _mirror_rows(self, display: str, picks: dict, mentioned: set[str]) -> None:
+        """Give every row pick a dropdown, and clear dropdowns left without one.
+
+        A dropdown the entry sets itself is kept as written; the row picks it
+        does not already hold go, in order, to the dropdowns the entry left
+        free (when every dropdown is set explicitly, the entry's choice
+        stands). Free dropdowns that receive no row are emptied, so a pick
+        inherited from the base bookmark cannot linger.
+        """
         row, dropdowns = self.settings.row_picker, self.settings.row_dropdowns
-        if not row or row not in picks or any(d in picks for d in dropdowns):
+        if not row or row not in picks:
             return
-        rows = picks[row]
-        if len(rows) > len(dropdowns):
-            raise BuildError(f"{display!r}: {len(rows)} row pick(s) but only "
+        if len(picks[row]) > len(dropdowns):
+            raise BuildError(f"{display!r}: {len(picks[row])} row pick(s) but only "
                              f"{len(dropdowns)} row dropdown(s) to mirror them into")
-        for dropdown, pick in zip(dropdowns, rows):
-            picks[dropdown] = [pick]
+        held = {_pick_key(p) for d in dropdowns for p in picks.get(d, [])}
+        waiting = [p for p in picks[row] if _pick_key(p) not in held]
+        free = [d for d in dropdowns if d not in picks]
+        for position, dropdown in enumerate(free):
+            picks[dropdown] = waiting[position:position + 1]
             mentioned.add(dropdown)
 
     def _legacy_checks(self, display: str, picks: dict) -> None:

@@ -420,3 +420,33 @@ def test_a_bookmark_built_without_a_group_is_registered_at_the_top_level(builder
     assert again.exit_code == 0, again.output
     top_again = [i["name"] for i in load(_bookmarks_dir(builder) / "bookmarks.json")["items"]]
     assert sorted(top_again) == sorted(top)
+
+
+def _picker_values_or_none(section: dict, vid: str) -> list[str]:
+    flt = _general_filter(section["visualContainers"][vid]["singleVisual"])
+    conds = [w["Condition"]["In"] for w in (flt or {}).get("Where") or [] if "In" in w["Condition"]]
+    return [row[0]["Literal"]["Value"] for row in conds[0]["Values"]] if conds else []
+
+
+def test_an_explicit_dropdown_for_one_row_still_mirrors_the_others(builder, tmp_path):
+    rows = [{"table": "_Accounts", "column": "Account Name", "label": "Account"},
+            {"table": "_Accounts", "column": "Account Service", "label": "Service"}]
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | Mixed", "pickers": {
+        "y_selector_2": rows, "y_selector_3": [rows[0]]}}])
+    result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP)
+    assert result.exit_code == 0, result.output
+    sec = _section(_by_display(builder)["Letters | Mixed"])
+    assert _picker_values(sec, PICKERS["y_selector_3"]) == [_literal(rows[0])]
+    # the row the explicit dropdown does not hold goes to the next free dropdown
+    assert _picker_values(sec, PICKERS["y_selector_4"]) == [_literal(rows[1])]
+
+
+def test_dropdowns_without_a_row_lose_the_base_bookmark_pick(builder, tmp_path):
+    row = {"table": "_Accounts", "column": "Account Name", "label": "Account"}
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | One row",
+                                    "pickers": {"y_selector_2": [row]}}])
+    assert _build(builder, cfg, "--base", BASE_ID, "--group", GROUP).exit_code == 0
+    sec = _section(_by_display(builder)["Letters | One row"])
+    assert _picker_values(sec, PICKERS["y_selector_3"]) == [_literal(row)]
+    for key in ("y_selector_4", "y_selector_5", "y_selector_6"):
+        assert _picker_values_or_none(sec, PICKERS[key]) == [], key

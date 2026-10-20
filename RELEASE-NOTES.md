@@ -140,6 +140,11 @@
 - `bookmarks build` without `--group` registers each new bookmark as a
   top-level entry of `bookmarks.json` (created if missing), so Power BI lists
   it; previously such bookmarks were written but not registered.
+- `bookmarks build` row mirroring: an entry that sets one row dropdown
+  itself still has its other row picks mirrored into the remaining
+  dropdowns (previously any explicit dropdown stopped all mirroring), and a
+  dropdown that receives no row is emptied instead of keeping the base
+  bookmark's pick, so the dropdowns hold exactly the rows (no `ABK010`).
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and
