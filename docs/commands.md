@@ -39,8 +39,8 @@ bookmark measures and colour collisions are reported as notes.
 fills go back to theme colour `--default-color-id` (9); matrix entries lose
 the owned properties and disappear when empty.
 
-Exit codes: `0` changes (planned or written), `2` nothing to change, `3`
-invalid input (palette or picker unreadable, an unresolvable bare `NAMEOF`,
+Exit codes: `0` changes written, or nothing to change; `1` a dry run found
+changes to make (rerun with `--apply`); `2` invalid input (palette or picker unreadable, an unresolvable bare `NAMEOF`,
 no registered measure). Invalid input writes nothing.
 
 ## bookmarks build

@@ -15,7 +15,8 @@ import pytest
 from ported_helpers import copy_fixture, load, run
 
 PAGE = "aa11bb22cc33dd44ee55"
-EXIT_CHANGES, EXIT_NONE, EXIT_INVALID = 0, 2, 3
+# 0: done, or nothing to do; 1: a dry run found changes to make; 2: usage error
+EXIT_CHANGES, EXIT_NONE, EXIT_PENDING, EXIT_INVALID = 0, 0, 1, 2
 
 
 @pytest.fixture
@@ -49,8 +50,15 @@ def _snapshot(shop: Path) -> dict[str, bytes]:
 def test_dry_run_reports_changes_and_writes_nothing(shop):
     before = _snapshot(shop)
     result = run("colors", "sync", *_args(shop))
-    assert result.exit_code == EXIT_CHANGES, result.output
+    assert result.exit_code == EXIT_PENDING, result.output
     assert _snapshot(shop) == before
+
+
+def test_a_dry_run_with_nothing_to_do_exits_0(shop):
+    assert run("colors", "sync", *_args(shop), "--apply").exit_code == EXIT_CHANGES
+    result = run("colors", "sync", *_args(shop))
+    assert result.exit_code == EXIT_NONE, result.output
+    assert "0 change(s)" in result.output
 
 
 def test_sync_stamps_bar_fill_from_palette_slot(shop):

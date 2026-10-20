@@ -930,8 +930,10 @@ def _compliance_text(compliance: dict, findings: list[Finding]) -> str:
 
 
 # -- colors ----------------------------------------------------------------------
-EXIT_NO_CHANGE = 2
-EXIT_INVALID = 3
+#: ``colors`` exit codes: 0 done or nothing to do, 1 a dry run found changes,
+#: 2 usage error (bad option, unreadable model, unparsable palette).
+EXIT_COLORS_PENDING = 1
+EXIT_INVALID = 2
 
 
 @main.group("colors")
@@ -973,7 +975,8 @@ def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
         click.echo(f"APPLIED: {len(result.written)} file(s) written.")
     else:
         click.echo(f"DRY RUN: {len(result.changes)} change(s); rerun with --apply to write.")
-    sys.exit(EXIT_OK if result.changes else EXIT_NO_CHANGE)
+    pending = bool(result.changes) and not apply
+    sys.exit(EXIT_COLORS_PENDING if pending else EXIT_OK)
 
 
 @colors.command("sync")
@@ -989,7 +992,8 @@ def colors_sync(report_dir, model_dir, apply, measure, palette_table, default_co
                 visual_types, min_series, all_visuals) -> None:
     """Colour each measure from its palette slot (dry run unless --apply).
 
-    Exits 0 when there are changes, 2 when there are none, 3 on invalid input.
+    Exits 0 when the changes were written or none are needed, 1 when a dry
+    run found changes to make, 2 on invalid input.
     """
     opts = ColorOptions(measure=measure, host_table=palette_table,
                         default_color_id=default_color_id,

@@ -130,6 +130,9 @@
   reports are kept.
 - `--summary` no longer reports a rule (or the run) as compliant while it has
   error findings.
+- `colors sync` / `colors reset` exit codes follow the other commands: `0`
+  written or nothing to do, `1` a dry run found changes, `2` invalid input
+  (previously `2` meant "no changes" and `3` invalid input).
 
 ### Notes on choices made where the specs left room
 
