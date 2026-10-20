@@ -1109,8 +1109,11 @@ def bookmarks_build(entries: Path, report_dir: Path, config_path: Path | None,
     except BuildError as exc:
         raise StylerError(str(exc)) from exc
     verb = "would write" if dry_run else "wrote"
-    for path in result.written:
-        click.echo(f"  {verb} {path.relative_to(report_dir).as_posix()}")
+    for note in result.notes:
+        click.echo(f"  note: {note}")
+    for path, display, kept in result.details:
+        origin = "kept id" if kept else "new id"
+        click.echo(f"  {verb} {path.relative_to(report_dir).as_posix()} ({origin}): {display}")
     for group_name, names in result.registered.items():
         where = "at the top level" if group_name == TOP_LEVEL else f"in group {group_name}"
         click.echo(f"  registered {len(names)} bookmark(s) {where}")

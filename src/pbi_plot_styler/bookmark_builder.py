@@ -18,7 +18,7 @@ Builder settings come from the ``[bookmarks]`` section of plotstyler.toml::
     row_dropdowns = ["<picker key>", ...]
     category_column = "Analysis Category"
     calendar_table = "__Calendar"
-    calendar_hierarchy = "Date Hierarchy"
+    calendar_hierarchy = "Calendar Hierarchy"
     pickers = {<key> = "<slicer visual id>", ...}
     wells = {matrix_rows = [...], matrix_values = [...], chart_y = [...],
              chart_y2 = [...], chart_series = [...]}
@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any
 
 from . import qx
-from .canvas import dig, first_in_condition, read_json, selections, slicer_filter
-from .textio import Layout, load_json, load_toml
+from .canvas import dig, first_in_condition, read_json, slicer_filter
+from .textio import Layout, dump_json, load_json, load_toml
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -48,11 +48,6 @@ class BuildError(ValueError):
 
 
 _WELL_KEYS = ("matrix_rows", "matrix_values", "chart_y", "chart_y2", "chart_series")
-_ENTRY_KEYS = {
-    "displayName", "pickers", "show", "hide", "show_groups", "hide_groups",
-    "target_visuals", "analysis_category", "date_filter", "drill_level",
-    "unhide_matrix", "matrix_sort", "group", "clear_filters",
-}
 
 
 @dataclass(frozen=True)
@@ -64,7 +59,7 @@ class BuilderSettings:
     row_dropdowns: tuple[str, ...] = ()
     category_column: str = "Analysis Category"
     calendar_table: str = "__Calendar"
-    calendar_hierarchy: str = "Date Hierarchy"
+    calendar_hierarchy: str = "Calendar Hierarchy"
     pickers: dict[str, str] = field(default_factory=dict)
     wells: dict[str, tuple[str, ...]] = field(default_factory=dict)
     #: Legacy layout: the picker whose picks fill the matrix Values well.
@@ -140,6 +135,11 @@ def _as_list(value: Any) -> list:
     return [value] if isinstance(value, str) else list(value or [])
 
 
+def _absent(value: Any) -> bool:
+    """``None``, an empty string or an empty list: the entry does not set it."""
+    return value is None or value == "" or value == []
+
+
 def _pick_key(pick: dict) -> tuple[str, str]:
     return pick["table"], pick["column"]
 
@@ -151,12 +151,58 @@ def _validate_pick(pick: Any, where: str) -> dict:
     return {"label": pick["column"], **pick}
 
 
+_DIRECTIONS = {"ascending": 1, "asc": 1, "descending": 2, "desc": 2}
+
+
+def _direction(display: str, value: Any) -> int:
+    """A sort direction as Power BI stores it (1 ascending, 2 descending)."""
+    if isinstance(value, bool):
+        raise BuildError(f"{display!r}: matrix_sort direction {value!r} is not 1 or 2")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _DIRECTIONS:
+            return _DIRECTIONS[text]
+        if text.lstrip("-").isdigit():
+            return int(text)
+    raise BuildError(f"{display!r}: matrix_sort direction {value!r} is not 1 or 2")
+
+
+def _sort_target(display: str, sort: Any) -> tuple[int, dict]:
+    """``(direction, expression)`` of a ``matrix_sort`` value.
+
+    Two spellings: ``{measure: {table, column}}`` / ``{column: {...}}`` with
+    an optional ``direction``, or the flat ``{table, column, direction,
+    kind}`` where ``kind`` is ``measure`` (the default) or ``column``.
+    """
+    if not isinstance(sort, dict):
+        raise BuildError(f"{display!r}: matrix_sort must be an object")
+    direction = _direction(display, sort.get("direction", 2))
+    if "measure" in sort or "column" in sort and isinstance(sort.get("column"), dict):
+        kind = "Measure" if "measure" in sort else "Column"
+        target = sort.get(kind.lower())
+        if not isinstance(target, dict) or not isinstance(target.get("table"), str) \
+                or not isinstance(target.get("column"), str):
+            raise BuildError(f"{display!r}: matrix_sort needs a 'measure' or 'column' "
+                             f"with a table and a column")
+        return direction, _ref(kind, target["table"], target["column"])
+    if isinstance(sort.get("table"), str) and isinstance(sort.get("column"), str):
+        kind = str(sort.get("kind") or "measure").strip().lower()
+        if kind not in ("measure", "column"):
+            raise BuildError(f"{display!r}: matrix_sort kind {kind!r} is not measure or column")
+        return direction, _ref(kind.capitalize(), sort["table"], sort["column"])
+    raise BuildError(f"{display!r}: matrix_sort needs a 'measure' or 'column'")
+
+
 @dataclass
 class _Built:
     name: str
+    display: str
     data: dict
     group: str | None
     rerendered: bool
+    notes: list[str] = field(default_factory=list)
 
 
 class Builder:
@@ -174,12 +220,10 @@ class Builder:
             data = read_json(path)
             if isinstance(data, dict):
                 self.existing[path.name[: -len(".bookmark.json")]] = (path, data)
-        base_id = base or settings.base
-        if not base_id:
-            raise BuildError("no base bookmark: pass --base or set [bookmarks] base")
-        self.base = self._find(base_id)
-        if self.base is None:
-            raise BuildError(f"base bookmark {base_id!r} not found in {self.dir}")
+        self.base_id = base or settings.base
+        self.base = self._find(self.base_id) if self.base_id else None
+        if self.base_id and self.base is None:
+            raise BuildError(f"base bookmark {self.base_id!r} not found in {self.dir}")
         self.groups = {
             item.get("name"): item for item in dig(self.index, "items") or []
             if isinstance(item, dict) and isinstance(item.get("name"), str)
@@ -195,7 +239,12 @@ class Builder:
         return None
 
     def _by_display(self, display: str) -> dict | None:
-        return next((d for _, d in self.existing.values() if d.get("displayName") == display), None)
+        found = [(path, d) for path, d in self.existing.values() if d.get("displayName") == display]
+        if len(found) > 1:
+            names = ", ".join(sorted(str(d.get("name") or path.name) for path, d in found))
+            raise BuildError(f"{display!r}: several existing bookmarks share this display "
+                             f"name ({names}); rename or delete all but one to re-render it")
+        return found[0][1] if found else None
 
     def _fresh_name(self) -> str:
         while True:
@@ -204,15 +253,29 @@ class Builder:
                 self.taken.add(name)
                 return name
 
+    def _page_visuals(self, section_id: Any) -> set[str] | None:
+        """Ids of the visuals saved on page ``section_id`` (``None``: unknown page)."""
+        if not isinstance(section_id, str):
+            return None
+        folder = self.report / "definition" / "pages" / section_id / "visuals"
+        if not folder.is_dir():
+            return None
+        ids = set()
+        for child in folder.iterdir():
+            if (child / "visual.json").is_file():
+                ids.add(child.name)
+                name = dig(read_json(child / "visual.json"), "name")
+                if isinstance(name, str):
+                    ids.add(name)
+        return ids
+
     # -- one entry ----------------------------------------------------------------
     def build(self, entry: Any) -> _Built:
         if not isinstance(entry, dict) or not isinstance(entry.get("displayName"), str) \
                 or not entry["displayName"]:
             raise BuildError(f"every entry needs a displayName: {entry!r}")
         display = entry["displayName"]
-        unknown = set(entry) - _ENTRY_KEYS
-        if unknown:
-            raise BuildError(f"{display!r}: unknown key(s) {sorted(unknown)}")
+        notes: list[str] = []
         pickers = entry.get("pickers") or {}
         if not isinstance(pickers, dict):
             raise BuildError(f"{display!r}: 'pickers' must map picker keys to lists of picks")
@@ -232,26 +295,42 @@ class Builder:
 
         existing = self._by_display(display) if self.keep_ids else None
         rerendered = existing is not None
-        data = copy.deepcopy(existing if rerendered else self.base)
+        if rerendered:
+            source = existing
+        elif entry.get("base"):
+            source = self._find(entry["base"])
+            if source is None:
+                raise BuildError(f"{display!r}: base bookmark {entry['base']!r} not found "
+                                 f"in {self.dir}")
+        elif self.base is not None:
+            source = self.base
+        else:
+            raise BuildError(f"{display!r}: no base bookmark: pass --base, set [bookmarks] "
+                             f"base or give the entry a 'base'")
+        data = copy.deepcopy(source)
         name = data.get("name") if rerendered else self._fresh_name()
         data["displayName"] = display
         data["name"] = name
         options = data.get("options") if isinstance(data.get("options"), dict) else {}
-        options["targetVisualNames"] = list(entry.get("target_visuals") or [])
+        targets = list(entry.get("target_visuals") or [])
+        if not targets and self.legacy and self.settings.matrix:
+            targets = [self.settings.matrix]
+        options["targetVisualNames"] = targets
         data["options"] = options
 
         state = data.get("explorationState")
-        section = dig(state, "sections", dig(state, "activeSection"))
+        section_id = dig(state, "activeSection")
+        section = dig(state, "sections", section_id)
         if not isinstance(section, dict):
             raise BuildError(f"{display!r}: the base bookmark has no active section")
         containers = section.setdefault("visualContainers", {})
 
         self._visibility(entry, section, containers)
-        if "analysis_category" in entry:
+        if not _absent(entry.get("analysis_category")):
             self._category(display, section, entry["analysis_category"])
-        if "date_filter" in entry:
+        if entry.get("date_filter") is not None:
             self._date(display, section, entry["date_filter"])
-        if "drill_level" in entry:
+        if not _absent(entry.get("drill_level")):
             chart = self._container(display, containers, self.settings.chart, "chart")
             levels = dig(chart, "singleVisual", "activeProjections", "Category")
             if not isinstance(dig(levels, 0, "HierarchyLevel"), dict):
@@ -259,16 +338,16 @@ class Builder:
             levels[0]["HierarchyLevel"]["Level"] = entry["drill_level"]
 
         mentioned = set(picks)
-        self._mirror_rows(display, picks, mentioned)
         if self.legacy:
             self._legacy_checks(display, picks)
-        effective = {
-            key: picks[key] if key in picks else self._base_picks(containers, key)
-            for key in self.settings.picker_keys
-        }
+        else:
+            self._mirror_rows(display, picks, mentioned)
         if entry.get("unhide_matrix", True):
-            self._matrix(display, containers, effective, entry.get("matrix_sort"))
-        self._chart(display, containers, effective, mentioned)
+            if self.legacy:
+                self._legacy_matrix(display, containers, picks, section_id, notes)
+            else:
+                self._matrix(display, containers, picks, entry.get("matrix_sort"))
+        self._chart(display, containers, picks, mentioned)
         for key in self.settings.picker_keys:
             if picks.get(key):
                 self._set_picker(display, containers, key, picks[key])
@@ -276,13 +355,12 @@ class Builder:
                 self._empty_picker(containers, key)
         if self.legacy:
             self._sync_values_slicers(containers, picks)
-        if rerendered:
-            for flt_name in entry.get("clear_filters") or []:
-                for holder in (state, section):
-                    for flt in dig(holder, "filters", "byExpr") or []:
-                        if isinstance(flt, dict) and flt.get("name") == flt_name:
-                            flt.pop("filter", None)
-        return _Built(name, data, group, rerendered)
+        for flt_name in entry.get("clear_filters") or []:
+            for holder in (state, section):
+                for flt in dig(holder, "filters", "byExpr") or []:
+                    if isinstance(flt, dict) and flt.get("name") == flt_name:
+                        flt.pop("filter", None)
+        return _Built(name, display, data, group, rerendered, notes)
 
     def _visibility(self, entry: dict, section: dict, containers: dict) -> None:
         for hidden, key in ((False, "show"), (True, "hide")):
@@ -300,16 +378,31 @@ class Builder:
                 groups.setdefault(gid, {})["isHidden"] = hidden
 
     def _category(self, display: str, section: dict, value: Any) -> None:
+        """Set the category filter, wherever the section keeps it.
+
+        The filter may sit in the ``byExpr`` list or in the ``byName`` map;
+        every match is updated. The default layout needs one; the legacy
+        layout leaves a base without one as it is.
+        """
         values = _as_list(value)
         column = self.settings.category_column
-        for flt in dig(section, "filters", "byExpr") or []:
-            if dig(flt, "expression", "Column", "Property") == column:
-                cond = first_in_condition(flt.get("filter"))
-                if cond is None:
-                    break
-                cond["Values"] = [[qx.lit(qx.quoted(v))] for v in values]
-                return
-        raise BuildError(f"{display!r}: the base bookmark has no [{column}] filter with an In condition")
+        filters = dig(section, "filters") or {}
+        candidates = [f for f in filters.get("byExpr") or [] if isinstance(f, dict)]
+        by_name = filters.get("byName")
+        if isinstance(by_name, dict):
+            candidates += [f for f in by_name.values() if isinstance(f, dict)]
+        found = False
+        for flt in candidates:
+            if dig(flt, "expression", "Column", "Property") != column:
+                continue
+            cond = first_in_condition(flt.get("filter"))
+            if cond is None:
+                continue
+            cond["Values"] = [[qx.lit(qx.quoted(v))] for v in values]
+            found = True
+        if not found and not self.legacy:
+            raise BuildError(f"{display!r}: the base bookmark has no [{column}] filter "
+                             f"with an In condition")
 
     def _date(self, display: str, section: dict, value: Any) -> None:
         if value != "this_year":
@@ -317,7 +410,8 @@ class Builder:
         cal, hierarchy = self.settings.calendar_table, self.settings.calendar_hierarchy
         for flt in dig(section, "filters", "byExpr") or []:
             if isinstance(flt, dict) and flt.get("type") == "RelativeDate":
-                alias = qx.alias_of(cal, "c")
+                # the alias is the table's first character, as Power BI names it
+                alias = cal[:1].lower() or "c"
                 hier = {"Expression": qx.source(alias=alias)}
                 hier["Hierarchy"] = hierarchy
                 level = {"Expression": {"Hierarchy": hier}, "Level": "Date"}
@@ -335,13 +429,12 @@ class Builder:
         return containers[vid]
 
     def _mirror_rows(self, display: str, picks: dict, mentioned: set[str]) -> None:
-        """Give every row pick a dropdown, and clear dropdowns left without one.
+        """Give every row pick a dropdown (default layout only).
 
         A dropdown the entry sets itself is kept as written; the row picks it
         does not already hold go, in order, to the dropdowns the entry left
-        free (when every dropdown is set explicitly, the entry's choice
-        stands). Free dropdowns that receive no row are emptied, so a pick
-        inherited from the base bookmark cannot linger.
+        free. A free dropdown that receives no row keeps the base bookmark's
+        pick, so no captured dropdown is left selecting nothing.
         """
         row, dropdowns = self.settings.row_picker, self.settings.row_dropdowns
         if not row or row not in picks:
@@ -352,8 +445,8 @@ class Builder:
         held = {_pick_key(p) for d in dropdowns for p in picks.get(d, [])}
         waiting = [p for p in picks[row] if _pick_key(p) not in held]
         free = [d for d in dropdowns if d not in picks]
-        for position, dropdown in enumerate(free):
-            picks[dropdown] = waiting[position:position + 1]
+        for dropdown, pick in zip(free, waiting):
+            picks[dropdown] = [pick]
             mentioned.add(dropdown)
 
     def _legacy_checks(self, display: str, picks: dict) -> None:
@@ -364,12 +457,13 @@ class Builder:
         if not 1 <= len(rows) <= 3:
             raise BuildError(f"{display!r}: the legacy layout needs 1 to 3 row picks")
 
-    def _base_picks(self, containers: dict, key: str) -> list[dict]:
-        vid = self.settings.pickers.get(key)
-        return [{"table": t, "column": c, "label": c}
-                for t, c in selections(containers.get(vid))] if vid else []
-
     def _parameter_expr(self, containers: dict, key: str) -> dict | None:
+        """The slot expression of picker ``key``: the parameter's display column.
+
+        The picker slicer filters on the parameter's hidden fields column;
+        the slot names the table behind that filter (its alias resolved) and
+        the display column, which is named like the table.
+        """
         flt = slicer_filter(containers.get(self.settings.pickers.get(key, "")))
         cond = first_in_condition(flt)
         column = dig(cond, "Expressions", 0, "Column")
@@ -379,61 +473,150 @@ class Builder:
                    if isinstance(s, dict)}
         source = dig(column, "Expression", "SourceRef", "Source")
         entity = aliases.get(source) or dig(column, "Expression", "SourceRef", "Entity")
-        return _ref("Column", entity, column.get("Property")) if entity else None
+        return _ref("Column", entity, entity) if isinstance(entity, str) and entity else None
 
     def _well(self, display: str, containers: dict, keys: tuple[str, ...], kind: str,
-              effective: dict) -> tuple[list, list]:
+              picks: dict) -> tuple[list, list]:
+        """Projections and slot map of one well.
+
+        Every picker of the well gets a slot at the running index, with
+        length 0 when it has no picks; only the entry's own picks (and the
+        rows mirrored into dropdowns) count.
+        """
         projections, parameters, seen = [], [], set()
         for key in keys:
-            picks = effective.get(key) or []
-            if not picks:
-                continue
-            for pick in picks:
+            chosen = picks.get(key) or []
+            for pick in chosen:
                 if _pick_key(pick) in seen:
                     raise BuildError(f"{display!r}: {pick['table']}[{pick['column']}] is "
                                      f"picked twice in one well")
                 seen.add(_pick_key(pick))
             expr = self._parameter_expr(containers, key)
             if expr is not None:
-                parameters.append({"expr": expr, "index": len(projections), "length": len(picks)})
-            projections += [_ref(kind, p["table"], p["column"]) for p in picks]
+                parameters.append({"expr": expr, "index": len(projections),
+                                   "length": len(chosen)})
+            projections += [_ref(kind, p["table"], p["column"]) for p in chosen]
         return projections, parameters
 
-    def _matrix(self, display: str, containers: dict, effective: dict, sort: Any) -> None:
+    def _matrix(self, display: str, containers: dict, picks: dict, sort: Any) -> None:
         matrix = self._container(display, containers, self.settings.matrix, "matrix")
         single = matrix.setdefault("singleVisual", {})
         for key in ("display", "expansionStates", "prototypeQuery"):
             single.pop(key, None)
-        if self.legacy:
-            rows_keys = (self.settings.row_picker,) if self.settings.row_picker else ()
-            value_keys = (self.settings.legacy_measures,)
-        else:
-            rows_keys = self.settings.well("matrix_rows")
-            value_keys = self.settings.well("matrix_values")
-        rows, row_params = self._well(display, containers, rows_keys, "Column", effective)
-        values, value_params = self._well(display, containers, value_keys, "Measure", effective)
+        rows, row_params = self._well(display, containers, self.settings.well("matrix_rows"),
+                                      "Column", picks)
+        values, value_params = self._well(display, containers,
+                                           self.settings.well("matrix_values"), "Measure", picks)
         if not rows and not values:
             for key in ("projections", "parameters", "activeProjections"):
                 single.pop(key, None)
         else:
             single["projections"] = {k: v for k, v in (("Rows", rows), ("Values", values)) if v}
             single["parameters"] = {
-                k: v for k, v in (("Rows", row_params), ("Values", value_params)) if v
+                k: v for k, v in (("Rows", row_params if rows else []),
+                                  ("Values", value_params if values else [])) if v
             }
             single["activeProjections"] = {"Rows": [rows[0]]} if rows else {}
-        if self.legacy and values:
-            sort = {"measure": {"table": dig(values, 0, "Measure", "Expression", "SourceRef",
-                                             "Entity"),
-                                "column": dig(values, 0, "Measure", "Property")}}
         if sort:
-            kind = "Measure" if "measure" in sort else "Column"
-            target = sort.get(kind.lower())
-            if not isinstance(target, dict):
-                raise BuildError(f"{display!r}: matrix_sort needs a 'measure' or 'column'")
-            single["orderBy"] = [{"Direction": sort.get("direction", 2),
-                                  "Expression": _ref(kind, target["table"], target["column"])}]
+            direction, expression = _sort_target(display, sort)
+            single["orderBy"] = [{"Direction": direction, "Expression": expression}]
 
-    def _chart(self, display: str, containers: dict, effective: dict, mentioned: set[str]) -> None:
+    def _relocate_matrix(self, display: str, containers: dict, section_id: Any,
+                         notes: list[str]) -> None:
+        """Legacy layout: move a matrix captured under a stale visual id.
+
+        When the configured matrix is not captured but exactly one other
+        captured container is matrix-shaped (rows and values projections)
+        and names no visual on the page, that capture is the matrix.
+        """
+        vid = self.settings.matrix
+        if not vid or isinstance(containers.get(vid), dict):
+            return
+        on_page = self._page_visuals(section_id)
+        if on_page is None:
+            return
+        candidates = [
+            cid for cid, container in containers.items()
+            if cid not in on_page and isinstance(container, dict)
+            and isinstance(dig(container, "singleVisual", "projections", "Rows"), list)
+            and isinstance(dig(container, "singleVisual", "projections", "Values"), list)
+        ]
+        if len(candidates) != 1:
+            return
+        old = candidates[0]
+        containers[vid] = containers.pop(old)
+        notes.append(f"{display!r}: the matrix was captured under the stale id {old}; "
+                     f"moved to {vid}")
+
+    @staticmethod
+    def _slot_in_place(single: dict, role: str, expr: dict | None, length: int) -> None:
+        """Update the base slot of a one-picker well, keeping its other keys."""
+        params = single.get("parameters")
+        if not isinstance(params, dict):
+            params = single["parameters"] = {}
+        slots = params.get(role)
+        if not isinstance(slots, list):
+            slots = params[role] = []
+        entity = dig(expr, "Column", "Expression", "SourceRef", "Entity")
+        slot = next((s for s in slots if isinstance(s, dict) and dig(
+            s, "expr", "Column", "Expression", "SourceRef", "Entity") == entity), None)
+        if slot is None:
+            slot = next((s for s in slots if isinstance(s, dict)), None)
+        if slot is None:
+            if expr is None:
+                return
+            slot = {}
+            slots.append(slot)
+        if expr is not None:
+            slot["expr"] = expr
+        slot["index"] = 0
+        slot["length"] = length
+
+    def _legacy_matrix(self, display: str, containers: dict, picks: dict,
+                       section_id: Any, notes: list[str]) -> None:
+        """Legacy layout: edit the base matrix capture in place.
+
+        Only the Rows and Values projections, their slots, the first sort
+        entry, the active rows and the first container filter change; the
+        display mode, expansion states, prototype query and other roles stay
+        as the base had them.
+        """
+        self._relocate_matrix(display, containers, section_id, notes)
+        matrix = self._container(display, containers, self.settings.matrix, "matrix")
+        single = matrix.setdefault("singleVisual", {})
+        row_key, measure_key = self.settings.row_picker or "", self.settings.legacy_measures
+        rows = [_ref("Column", p["table"], p["column"]) for p in picks.get(row_key, [])]
+        values = [_ref("Measure", p["table"], p["column"]) for p in picks.get(measure_key, [])]
+        for well in (rows, values):
+            keys = [_pick_key({"table": dig(r, k, "Expression", "SourceRef", "Entity"),
+                               "column": dig(r, k, "Property")})
+                    for r in well for k in r]
+            if len(set(keys)) != len(keys):
+                raise BuildError(f"{display!r}: a field is picked twice in one well")
+        projections = single.get("projections")
+        if not isinstance(projections, dict):
+            projections = single["projections"] = {}
+        projections["Rows"] = rows
+        projections["Values"] = values
+        self._slot_in_place(single, "Rows", self._parameter_expr(containers, row_key), len(rows))
+        self._slot_in_place(single, "Values", self._parameter_expr(containers, measure_key),
+                            len(values))
+        active = single.get("activeProjections")
+        if not isinstance(active, dict):
+            active = single["activeProjections"] = {}
+        active["Rows"] = copy.deepcopy(rows)
+        first = copy.deepcopy(values[0])
+        order = single.get("orderBy")
+        if isinstance(order, list) and order and isinstance(order[0], dict):
+            order[0]["Expression"] = first
+        else:
+            single["orderBy"] = [{"Direction": 2, "Expression": first}]
+        container_filters = dig(matrix, "filters", "byExpr")
+        if isinstance(container_filters, list) and container_filters \
+                and isinstance(container_filters[0], dict):
+            container_filters[0]["expression"] = copy.deepcopy(values[0])
+
+    def _chart(self, display: str, containers: dict, picks: dict, mentioned: set[str]) -> None:
         plan = (("chart_y", "Y", "Measure"), ("chart_y2", "Y2", "Measure"),
                 ("chart_series", "Series", "Column"))
         for well, role, kind in plan:
@@ -442,10 +625,12 @@ class Builder:
                 continue
             chart = self._container(display, containers, self.settings.chart, "chart")
             single = chart.setdefault("singleVisual", {})
-            projections, parameters = self._well(display, containers, keys, kind, effective)
+            projections, parameters = self._well(display, containers, keys, kind, picks)
             single.setdefault("projections", {})[role] = projections
             if parameters:
                 single.setdefault("parameters", {})[role] = parameters
+            elif isinstance(single.get("parameters"), dict):
+                single["parameters"].pop(role, None)
 
     def _set_picker(self, display: str, containers: dict, key: str, picks: list[dict]) -> None:
         vid = self.settings.pickers[key]
@@ -473,11 +658,11 @@ class Builder:
     def _sync_values_slicers(self, containers: dict, picks: dict) -> None:
         """Legacy layout: clear each values slicer, then point it at its dimension.
 
-        The slicer's preselection is always dropped. When the paired
-        dimension picker has picks, the slicer's column (first ``Values``
-        projection, first active ``Values`` entry, and every column-valued
-        ``filters.byExpr`` expression) becomes that picker's first pick. A
-        slicer the base bookmark does not capture is skipped.
+        The slicer's preselection is always dropped. When the entry gives
+        the paired dimension picker picks, the slicer's column (first
+        ``Values`` projection, first active ``Values`` entry, and every
+        column-valued ``filters.byExpr`` expression) becomes that picker's
+        first pick. A slicer the base bookmark does not capture is skipped.
         """
         for key, dimension in self.settings.values_slicers.items():
             container = containers.get(self.settings.pickers[key])
@@ -501,18 +686,34 @@ class Builder:
                     node["Column"] = copy.deepcopy(column)
 
     def _empty_picker(self, containers: dict, key: str) -> None:
+        """A picker without picks keeps its slicer's shape.
+
+        Default layout: the In condition stays, with no values. Legacy
+        layout: the conditions go. Either way the cached display list is
+        kept, empty.
+        """
         container = containers.get(self.settings.pickers.get(key, ""))
         flt = slicer_filter(container)
         if flt is None:
             return
-        flt["Where"] = []
-        container["singleVisual"].pop("cachedFilterDisplayItems", None)
+        if self.legacy:
+            flt["Where"] = []
+        else:
+            cond = first_in_condition(flt)
+            if cond is not None:
+                cond["Values"] = []
+        single = container["singleVisual"]
+        if "cachedFilterDisplayItems" in single:
+            single["cachedFilterDisplayItems"] = []
 
 
 @dataclass
 class BuildResult:
     written: list[Path]
     registered: dict[str, list[str]]
+    #: one ``(path, display name, id kept)`` per written bookmark.
+    details: list[tuple[Path, str, bool]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 #: the ``registered`` key for bookmarks listed outside any group.
@@ -539,6 +740,8 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
         index = {"items": []}
     top_level = index.setdefault("items", [])
     for item in built:
+        if item.rerendered:
+            continue  # a kept bookmark keeps its place in the index
         if item.group is None:
             # no group: the bookmark is its own top-level entry
             if not any(i.get("name") == item.name for i in top_level):
@@ -558,12 +761,14 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
         group_item = next(i for i in index["items"] if i.get("name") == group_name)
         group_item["children"] = names + group_item["children"]
 
-    written: list[Path] = []
+    notes = [note for item in built for note in item.notes]
+    details = [(builder.dir / f"{b.name}.bookmark.json", b.display, b.rerendered) for b in built]
     if dry_run:
-        return BuildResult([builder.dir / f"{b.name}.bookmark.json" for b in built], registered)
+        return BuildResult([d[0] for d in details], registered, details, notes)
+    written: list[Path] = []
     for item in built:
         path = builder.dir / f"{item.name}.bookmark.json"
-        path.write_bytes(Layout.of_file(path).encode(json.dumps(item.data, indent=2)))
+        path.write_bytes(Layout.of_file(path).encode(dump_json(item.data)))
         written.append(path)
     if registered:
         from .rules import rewrite_json
@@ -571,5 +776,5 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
         if index_path.is_file():
             rewrite_json(index_path, index)
         else:
-            index_path.write_bytes(Layout().encode(json.dumps(index, indent=2)))
-    return BuildResult(written, registered)
+            index_path.write_bytes(Layout().encode(dump_json(index)))
+    return BuildResult(written, registered, details, notes)

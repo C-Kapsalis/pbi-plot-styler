@@ -56,46 +56,75 @@ the base bookmark, with a fresh 20-hex-character name. Entry keys:
 | Key | Effect |
 |---|---|
 | `displayName` | Required |
+| `base` | Base bookmark for this entry (beats `--base` and `[bookmarks] base`; in re-render mode an existing bookmark with the display name still wins) |
 | `pickers` | `{picker key: [{table, column, label}, ...]}`: the slicer's saved selection and cached labels |
 | `show`, `hide` | Visual ids to show (removes `display`) or hide |
 | `show_groups`, `hide_groups` | Visual group ids to show or hide |
 | `target_visuals` | `options.targetVisualNames` (default `[]`; the key is never removed) |
-| `analysis_category` | One value or a list for the category filter |
-| `date_filter` | `this_year`: the relative-date filter selects the current year |
-| `drill_level` | The chart's Category hierarchy level |
+| `analysis_category` | One value or a list for the category filter (`null` or empty: unchanged) |
+| `date_filter` | `this_year`: the relative-date filter selects the current year (`null`: unchanged; any other value is an error) |
+| `drill_level` | The chart's Category hierarchy level (`null` or empty: unchanged) |
 | `unhide_matrix` | `false` keeps the base matrix capture |
-| `matrix_sort` | `{measure: {table, column}}` or `{column: {...}}`, optional `direction` (default 2) |
+| `matrix_sort` | `{measure: {table, column}}` or `{column: {...}}`, or the flat `{table, column, kind}` (`kind` `measure` by default); optional `direction` (default 2; `1`/`2`, `"1"`, `ascending`/`descending`) |
 | `group` | bookmarks.json group for this entry (beats `--group`) |
-| `clear_filters` | With `--keep-ids`: `byExpr` filters whose `filter` is dropped |
+| `clear_filters` | `byExpr` filters whose `filter` is dropped (report and page level) |
 
 Settings live in the `[bookmarks]` section: `base`, `matrix`, `chart`,
-`row_picker`, `row_dropdowns`, `category_column`, `calendar_table`,
-`calendar_hierarchy`, `pickers = {key = "<slicer visual id>"}` and
+`row_picker`, `row_dropdowns`, `category_column`, `calendar_table`
+(default `__Calendar`), `calendar_hierarchy` (default `Calendar Hierarchy`),
+`pickers = {key = "<slicer visual id>"}` and
 `wells = {matrix_rows, matrix_values, chart_y, chart_y2, chart_series}`
 (lists of picker keys). The well map has no built-in default: list the
-pickers that feed each well.
+pickers that feed each well. Other keys in an entry are ignored.
 
-The builder mirrors the row picker's picks into the row dropdowns when the
-entry fills none of them (more picks than dropdowns is an error); rebuilds the
-matrix Rows and Values wells and their slot map (a pick may appear only once
-per well); rebuilds a chart well only when the entry mentions one of its
-pickers; and writes each picker's selection literal `'''table''[column]'`.
-A picker the entry does not mention keeps the base selection, which also
-feeds the matrix wells.
+The builder gives every row pick a row dropdown (more picks than dropdowns
+is an error; a dropdown the entry sets itself is kept, and a free dropdown
+that receives no row keeps the base bookmark's pick, so no captured dropdown
+selects nothing). The matrix Rows and Values wells and their slot map are
+built from the entry's own picks plus the mirrored rows only: a picker the
+entry does not mention keeps its saved selection on its slicer but adds
+nothing to any well. Each picker of a well with projections gets a slot at
+the running index (length 0 when it has no picks); a slot names the
+field parameter's display column (the column named like the parameter's
+table), never the hidden fields column the picker filters on. A pick may
+appear only once per well (matrix and chart). A chart well is rebuilt, and
+its slot map replaced, only when the entry mentions one of its pickers. A
+picker named with an empty list keeps its In condition with no values and an
+empty cached list. Bookmark files are written as UTF-8 with non-ASCII text
+as is. The date filter's calendar alias is the calendar table's first
+character (`_` for `__Calendar`).
 
 `--keep-ids` re-renders: a bookmark with the entry's display name is the base
-and keeps its name, and new bookmarks go to the front of the group.
+and keeps its name and its place in `bookmarks.json`; only new bookmarks are
+registered, at the front of the group. Two existing bookmarks with the same
+display name are an error naming both. Each written line says whether the id
+was kept or new and shows the display name.
+
 `--legacy-layout` renders the single-page layout: the `x_selector_1` picker
-(`legacy_measures`) fills the matrix values (at least 3), the row picker 1 to
-3 rows, the matrix sorts on the first measure, and unmentioned pickers are
-emptied. Values slicers are `pickers` keys named `y_values_slicer_<N>`
-(N = 2..6), each listing the values of the dimension picked in
-`y_selector_<N>`: the layout always clears their preselection and, when
-`y_selector_<N>` has picks, points their column at its first pick (never a
-measure). They cannot be picked in an entry, and one the base bookmark does
-not capture is skipped. `--dry-run` builds everything and writes nothing. Any invalid entry,
-missing picker, filter or capture stops the run with exit `2` before a file
-is written.
+(`legacy_measures`) fills the matrix values (at least 3) and the row picker 1
+to 3 rows. Rows are not mirrored: every other picker holds exactly the picks
+the entry gives it, or is emptied (conditions removed, cached list kept
+empty). The matrix capture is edited in place: only the Rows and Values
+projections, their slots (length and index updated, other slot keys kept),
+the first sort entry (pointed at the first measure, keeping its direction
+and later entries; a single descending entry is added only when there is
+none), the active rows (all of them) and the first container-level
+expression filter (pointed at the first measure) change; the display mode,
+expansion states, prototype query and other roles stay as the base had them.
+A matrix the base captures only under a stale id (exactly one matrix-shaped
+capture whose id is no visual on the page) is moved to the configured id,
+with a note. Without `target_visuals` the bookmark is scoped to the matrix.
+The category filter is looked up in the page's `byExpr` list and `byName`
+map; a base without one is left as it is. Values slicers are `pickers` keys
+named `y_values_slicer_<N>` (N = 2..6), each listing the values of the
+dimension picked in `y_selector_<N>`: the layout always clears their
+preselection and, when the entry gives `y_selector_<N>` picks, points their
+column at its first pick (never a measure). They cannot be picked in an
+entry, and one the base bookmark does not capture is skipped.
+
+`--dry-run` builds everything and writes nothing. Any invalid entry,
+missing picker, chart or matrix capture, filter or base stops the run with
+exit `2` before a file is written.
 
 ## rename-measure
 

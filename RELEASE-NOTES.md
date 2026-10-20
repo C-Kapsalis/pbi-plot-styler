@@ -93,6 +93,11 @@
   `--dry-run` without `--fix` is a usage error.
 - **STRICTER: `slicer-gates` checks bookmark captures too** (`GAT002`), not
   only the slicer visuals.
+- **STRICTER: `bookmarks build` stops on what it cannot apply.** A
+  `date_filter` other than `this_year` (or `null`) is an error; a chart or
+  legacy picker capture the base lacks is an error rather than a skip; a
+  pick repeated in a chart well is an error as in a matrix well. Every
+  build failure exits `2` and writes no file at all.
 - `plotstyler.toml` accepts the sections of `check` and `bookmarks build`
   next to `[tables]`, `[targets]` and `[style]`; `style` ignores them. An
   unknown section is still an error.
@@ -142,9 +147,48 @@
   it; previously such bookmarks were written but not registered.
 - `bookmarks build` row mirroring: an entry that sets one row dropdown
   itself still has its other row picks mirrored into the remaining
-  dropdowns (previously any explicit dropdown stopped all mirroring), and a
-  dropdown that receives no row is emptied instead of keeping the base
-  bookmark's pick, so the dropdowns hold exactly the rows (no `ABK010`).
+  dropdowns (previously any explicit dropdown stopped all mirroring). A
+  dropdown that receives no row keeps the base bookmark's pick, so no
+  captured dropdown selects nothing (`ABK006`). The legacy layout does not
+  mirror rows.
+- `bookmarks build` slot expressions name the field parameter's display
+  column (the column named like the table), not the hidden fields column the
+  picker slicer filters on, in both layouts.
+- `bookmarks build` wells take only the entry's own picks (plus mirrored
+  rows): a picker the entry does not mention keeps its saved selection on
+  its slicer but no longer feeds the matrix or chart wells, so base
+  placeholders cannot cause a "picked twice" error. Each picker of a well
+  with projections gets a slot, with length 0 when it has no picks, and a
+  rewritten chart role gets a fresh slot map.
+- `bookmarks build --legacy-layout` edits the matrix capture in place: only
+  the Rows and Values projections, their slots, the first sort entry, the
+  active rows (now all rows) and the first container-level filter (pointed
+  at the first measure) change; display mode, expansion states, prototype
+  query, other roles, later sort entries and other slot keys are kept. A
+  matrix captured only under a stale id is moved to the configured id with
+  a note. Without `target_visuals` the bookmark is scoped to the matrix. The
+  category filter is also found in the page's `byName` map, and a base
+  without one is left unchanged instead of failing.
+- `bookmarks build` writes non-ASCII text in bookmark files as UTF-8, not
+  as `\u` escapes.
+- `bookmarks build`: the default `calendar_hierarchy` is `Calendar
+  Hierarchy`, and the date filter's calendar alias is the table's first
+  character (`_` for `__Calendar`).
+- `bookmarks build`: an entry may name its own `base`; `clear_filters`
+  applies to every built bookmark, not only re-rendered ones; a picker named
+  with an empty list keeps its In condition with no values and an empty
+  cached list (legacy layout: no conditions, empty cached list);
+  `matrix_sort` also accepts the flat `{table, column, direction, kind}`
+  form and a direction written as text; a `null` or empty
+  `analysis_category` or `drill_level`, and a `null` `date_filter`, leave the
+  base unchanged.
+- `bookmarks build --keep-ids` registers only the bookmarks it creates; a
+  kept bookmark keeps its place in `bookmarks.json` (it was re-added at the
+  top level when no group was given). Two existing bookmarks sharing the
+  entry's display name are an error naming both. Each written line says
+  whether the id was kept or new and shows the display name.
+- `bookmarks build` ignores entry keys it does not know, as earlier builder
+  configs expect (they were rejected).
 - `bookmarks build --legacy-layout` handles the values slicers: the
   `[bookmarks] pickers` key `y_values_slicer_<N>` (N = 2..6) names the slicer
   that lists the values of the dimension picked in `y_selector_<N>`. Its
@@ -180,7 +224,8 @@
   lists the pickers of each well (the example fixture maps the matrix values
   to one picker, because its entries pick the same measure in two pickers of
   that well). Pickers an entry does not mention keep the base bookmark's
-  selection. The legacy layout empties unmentioned pickers.
+  selection on their slicers (never in a well). The legacy layout empties
+  unmentioned pickers.
 
 ## v1.1.0, 2026-10-12
 
