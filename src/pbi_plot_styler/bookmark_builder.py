@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import secrets
 import sys
 from dataclasses import dataclass, field
@@ -223,7 +224,9 @@ class Builder:
         self.base_id = base or settings.base
         self.base = self._find(self.base_id) if self.base_id else None
         if self.base_id and self.base is None:
-            raise BuildError(f"base bookmark {self.base_id!r} not found in {self.dir}")
+            if base:
+                raise BuildError(f"base bookmark {self.base_id} not found in {self.dir}")
+            raise BuildError(f"no base bookmark {self.base_id} in {self.dir}")
         self.groups = {
             item.get("name"): item for item in dig(self.index, "items") or []
             if isinstance(item, dict) and isinstance(item.get("name"), str)
@@ -291,7 +294,7 @@ class Builder:
         }
         group = entry.get("group") or self.group
         if group is not None and group not in self.groups:
-            raise BuildError(f"{display!r}: group {group!r} is not in bookmarks.json")
+            raise BuildError(f"bookmark group {group} not found")
 
         existing = self._by_display(display) if self.keep_ids else None
         rerendered = existing is not None
@@ -300,8 +303,7 @@ class Builder:
         elif entry.get("base"):
             source = self._find(entry["base"])
             if source is None:
-                raise BuildError(f"{display!r}: base bookmark {entry['base']!r} not found "
-                                 f"in {self.dir}")
+                raise BuildError(f"base bookmark {entry['base']} not found in {self.dir}")
         elif self.base is not None:
             source = self.base
         else:
@@ -338,8 +340,16 @@ class Builder:
             levels[0]["HierarchyLevel"]["Level"] = entry["drill_level"]
 
         mentioned = set(picks)
+        if not self.legacy:
+            # every built section carries the group-visibility map
+            section.setdefault("visualContainerGroups", {})
+            chart = containers.get(self.settings.chart or "")
+            if isinstance(chart, dict):
+                single = chart.setdefault("singleVisual", {})
+                single.setdefault("projections", {})
+                single.setdefault("parameters", {})
         if self.legacy:
-            self._legacy_checks(display, picks)
+            self._legacy_checks(entry, picks)
         else:
             self._mirror_rows(display, picks, mentioned)
         if entry.get("unhide_matrix", True):
@@ -401,8 +411,7 @@ class Builder:
             cond["Values"] = [[qx.lit(qx.quoted(v))] for v in values]
             found = True
         if not found and not self.legacy:
-            raise BuildError(f"{display!r}: the base bookmark has no [{column}] filter "
-                             f"with an In condition")
+            raise BuildError(f"{display}: base bookmark has no {column} filter slot")
 
     def _date(self, display: str, section: dict, value: Any) -> None:
         if value != "this_year":
@@ -421,12 +430,32 @@ class Builder:
                 )
                 flt["howCreated"] = 1
                 return
-        raise BuildError(f"{display!r}: the base bookmark has no RelativeDate filter")
+        raise BuildError(f"{display}: base bookmark has no RelativeDate filter slot")
 
     def _container(self, display: str, containers: dict, vid: str | None, what: str) -> dict:
         if not vid or not isinstance(containers.get(vid), dict):
-            raise BuildError(f"{display!r}: the {what} {vid!r} is not captured in the base bookmark")
+            if what == "matrix":
+                raise BuildError(f"{display}: base bookmark does not capture the Main Matrix")
+            raise BuildError(f"{display}: base bookmark does not capture the {what} {vid}")
         return containers[vid]
+
+    def _parameter_name(self, key: str) -> str:
+        """The field parameter a picker slicer filters (the key when unknown)."""
+        expr = self._parameter_expr(dig(self.base, "explorationState", "sections",
+                                        dig(self.base, "explorationState", "activeSection"),
+                                        "visualContainers") or {}, key)
+        entity = dig(expr, "Column", "Expression", "SourceRef", "Entity")
+        return entity if isinstance(entity, str) else key
+
+    def _dropdown_span(self) -> str:
+        """The row dropdowns as ``y-Selector 3..6``: first name, then the last number."""
+        names = [self._parameter_name(k) for k in self.settings.row_dropdowns]
+        if not names:
+            return ""
+        if len(names) == 1:
+            return names[0]
+        tail = re.search(r"(\d+)$", names[-1])
+        return f"{names[0]}..{tail.group(1) if tail else names[-1]}"
 
     def _mirror_rows(self, display: str, picks: dict, mentioned: set[str]) -> None:
         """Give every row pick a dropdown (default layout only).
@@ -440,8 +469,9 @@ class Builder:
         if not row or row not in picks:
             return
         if len(picks[row]) > len(dropdowns):
-            raise BuildError(f"{display!r}: {len(picks[row])} row pick(s) but only "
-                             f"{len(dropdowns)} row dropdown(s) to mirror them into")
+            raise BuildError(f"{display}: {len(picks[row])} row dimensions but only "
+                             f"{len(dropdowns)} dropdown filters ({self._dropdown_span()}) "
+                             f"to carry them")
         held = {_pick_key(p) for d in dropdowns for p in picks.get(d, [])}
         waiting = [p for p in picks[row] if _pick_key(p) not in held]
         free = [d for d in dropdowns if d not in picks]
@@ -449,13 +479,17 @@ class Builder:
             picks[dropdown] = [pick]
             mentioned.add(dropdown)
 
-    def _legacy_checks(self, display: str, picks: dict) -> None:
+    def _legacy_checks(self, entry: dict, picks: dict) -> None:
+        category = entry.get("analysis_category")
+        if isinstance(category, list):
+            category = ", ".join(str(c) for c in category)
+        label = category if category else entry["displayName"]
         measures = picks.get(self.settings.legacy_measures, [])
         rows = picks.get(self.settings.row_picker or "", [])
         if len(measures) < 3:
-            raise BuildError(f"{display!r}: the legacy layout needs at least 3 measures")
+            raise BuildError(f"{label}: need >=3 measures, got {len(measures)}")
         if not 1 <= len(rows) <= 3:
-            raise BuildError(f"{display!r}: the legacy layout needs 1 to 3 row picks")
+            raise BuildError(f"{label}: y1 drilldown picks = {len(rows)}, expected 1-3")
 
     def _parameter_expr(self, containers: dict, key: str) -> dict | None:
         """The slot expression of picker ``key``: the parameter's display column.
@@ -476,21 +510,28 @@ class Builder:
         return _ref("Column", entity, entity) if isinstance(entity, str) and entity else None
 
     def _well(self, display: str, containers: dict, keys: tuple[str, ...], kind: str,
-              picks: dict) -> tuple[list, list]:
+              picks: dict, role: str) -> tuple[list, list]:
         """Projections and slot map of one well.
 
         Every picker of the well gets a slot at the running index, with
         length 0 when it has no picks; only the entry's own picks (and the
         rows mirrored into dropdowns) count.
         """
-        projections, parameters, seen = [], [], set()
+        projections, parameters = [], []
+        seen: dict[tuple[str, str], str] = {}
         for key in keys:
             chosen = picks.get(key) or []
             for pick in chosen:
-                if _pick_key(pick) in seen:
-                    raise BuildError(f"{display!r}: {pick['table']}[{pick['column']}] is "
+                owner = seen.get(_pick_key(pick))
+                if owner is not None and owner != key:
+                    raise BuildError(
+                        f"{display}: {pick['column']!r} is selected in both {owner} and {key}; "
+                        f"distribute the measure set across the {role} parameters instead of "
+                        f"repeating it")
+                if owner is not None:
+                    raise BuildError(f"{display}: {pick['table']}[{pick['column']}] is "
                                      f"picked twice in one well")
-                seen.add(_pick_key(pick))
+                seen[_pick_key(pick)] = key
             expr = self._parameter_expr(containers, key)
             if expr is not None:
                 parameters.append({"expr": expr, "index": len(projections),
@@ -504,9 +545,10 @@ class Builder:
         for key in ("display", "expansionStates", "prototypeQuery"):
             single.pop(key, None)
         rows, row_params = self._well(display, containers, self.settings.well("matrix_rows"),
-                                      "Column", picks)
+                                      "Column", picks, "Rows")
         values, value_params = self._well(display, containers,
-                                           self.settings.well("matrix_values"), "Measure", picks)
+                                          self.settings.well("matrix_values"), "Measure", picks,
+                                          "Values")
         if not rows and not values:
             for key in ("projections", "parameters", "activeProjections"):
                 single.pop(key, None)
@@ -625,7 +667,7 @@ class Builder:
                 continue
             chart = self._container(display, containers, self.settings.chart, "chart")
             single = chart.setdefault("singleVisual", {})
-            projections, parameters = self._well(display, containers, keys, kind, picks)
+            projections, parameters = self._well(display, containers, keys, kind, picks, role)
             single.setdefault("projections", {})[role] = projections
             if parameters:
                 single.setdefault("parameters", {})[role] = parameters
@@ -636,10 +678,15 @@ class Builder:
         vid = self.settings.pickers[key]
         container = containers.get(vid)
         if not isinstance(container, dict):
-            raise BuildError(f"{display!r}: picker {key!r} ({vid}) is not captured in the base bookmark")
-        cond = first_in_condition(slicer_filter(container))
+            raise BuildError(f"{display}: picker {key} ({vid}) not captured by base bookmark")
+        flt = slicer_filter(container)
+        if flt is None:
+            raise BuildError(f"{display}: picker visual carries no general filter to rewrite")
+        if not isinstance(flt.get("Where"), list) or not flt["Where"]:
+            raise BuildError(f"{display}: picker visual filter has no Where clause")
+        cond = first_in_condition(flt)
         if cond is None:
-            raise BuildError(f"{display!r}: picker {key!r} has no general filter with an In condition")
+            raise BuildError(f"{display}: picker visual filter has no In condition")
         cond["Values"] = [[qx.lit(_pick_literal(p))] for p in picks]
         single = container["singleVisual"]
         cached = single.get("cachedFilterDisplayItems")
@@ -696,13 +743,14 @@ class Builder:
         flt = slicer_filter(container)
         if flt is None:
             return
+        single = container["singleVisual"]
         if self.legacy:
             flt["Where"] = []
-        else:
-            cond = first_in_condition(flt)
-            if cond is not None:
-                cond["Values"] = []
-        single = container["singleVisual"]
+            single["cachedFilterDisplayItems"] = []
+            return
+        cond = first_in_condition(flt)
+        if cond is not None:
+            cond["Values"] = []
         if "cachedFilterDisplayItems" in single:
             single["cachedFilterDisplayItems"] = []
 
@@ -778,3 +826,50 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
         else:
             index_path.write_bytes(Layout().encode(dump_json(index)))
     return BuildResult(written, registered, details, notes)
+
+
+def builder_self_test(report: Path, settings: BuilderSettings, *, base: str | None = None,
+                      legacy: bool = False) -> list[str]:
+    """Build one synthetic entry in memory and check it; returns the lines to print.
+
+    Default layout: one pick in the first matrix-values picker must become that
+    picker's only selection and cached label, under a fresh name. Legacy
+    layout: three measures and one row must give 3 Values and 1 Rows
+    projection. Raises :class:`BuildError` when a check fails.
+    """
+    builder = Builder(report, settings, base=base, group=None, keep_ids=False, legacy=legacy)
+    if legacy:
+        measures = [{"table": "Self Test Measures", "column": c, "label": c}
+                    for c in ("Self Test A", "Self Test B", "Self Test C")]
+        row = [{"table": "Self Test Rows", "column": "Self Test Row", "label": "Self Test Row"}]
+        entry = {"displayName": "Self test", "analysis_category": "Self test",
+                 "pickers": {settings.legacy_measures: measures, settings.row_picker or "": row}}
+    else:
+        keys = settings.well("matrix_values") or settings.picker_keys
+        if not keys:
+            raise BuildError("self-test: [bookmarks] has no picker to fill")
+        pick = {"table": "Self Test Measures", "column": "Self Test #", "label": "Self Test #"}
+        entry = {"displayName": "Self test", "pickers": {keys[0]: [pick]}}
+    built = builder.build(entry)
+    section = dig(built.data, "explorationState", "sections",
+                  dig(built.data, "explorationState", "activeSection"))
+    containers = dig(section, "visualContainers") or {}
+    if built.name == builder.base_id or built.name in builder.existing:
+        raise BuildError("self-test FAIL: the built bookmark reuses an existing name")
+    if legacy:
+        matrix = dig(containers, settings.matrix or "", "singleVisual") or {}
+        rows = dig(matrix, "projections", "Rows") or []
+        values = dig(matrix, "projections", "Values") or []
+        if len(values) != 3 or len(rows) != 1:
+            raise BuildError(f"self-test FAIL: matrix holds {len(values)} value(s) and "
+                             f"{len(rows)} row(s)")
+        names = [dig(v, "Measure", "Property") for v in values]
+        return ["self-test PASS", f"  generated: {built.name}", f"  measures: {names}",
+                f"  matrix projections.Rows count: {len(rows)}"]
+    key = next(iter(entry["pickers"]))
+    container = containers.get(settings.pickers[key])
+    cond = first_in_condition(slicer_filter(container))
+    values = [dig(row, 0, "Literal", "Value") for row in (cond or {}).get("Values") or []]
+    if values != [_pick_literal(entry["pickers"][key][0])]:
+        raise BuildError(f"self-test FAIL: picker {key} holds {values}")
+    return ["self-test PASS"]

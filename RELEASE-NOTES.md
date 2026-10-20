@@ -329,6 +329,22 @@
 - BUGFIX (kept): `rename-measure` follows dotted measure names, treats the
   new name literally and its dry-run count equals the rewrite count;
   `rename-label` is all or nothing.
+- `bookmarks build` console output: one absolute file path per written
+  bookmark (no registration or summary lines); with `--keep-ids`,
+  `kept <id> <display name>` / `NEW  <id> <display name>`. Error texts follow
+  the earlier builder scripts (`base bookmark <id> not found in <folder>`,
+  `no base bookmark <id> in <folder>`, `bookmark group <group> not found`,
+  `picker <key> (<id>) not captured by base bookmark`, `... row dimensions but
+  only <m> dropdown filters (y-Selector 3..6) to carry them`, `base bookmark
+  does not capture the Main Matrix`, `base bookmark has no RelativeDate filter
+  slot`, `need >=3 measures, got <n>`, ...). Each starts with the entry's
+  display name (the legacy limits with its analysis category). A field picked
+  in two pickers of one well names both pickers and the role.
+- `bookmarks build --self-test [--legacy-layout]` checks the builder against
+  the report's base bookmark and prints `self-test PASS`.
+- `bookmarks build` always writes `visualContainerGroups` on the built section
+  and `projections` / `parameters` on a captured chart (default layout), and an
+  empty cached list on a legacy picker it empties.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

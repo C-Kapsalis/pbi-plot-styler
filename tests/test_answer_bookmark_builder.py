@@ -415,7 +415,6 @@ def test_a_bookmark_built_without_a_group_is_registered_at_the_top_level(builder
     built.pop("Base | Template")
     top = [i["name"] for i in load(_bookmarks_dir(builder) / "bookmarks.json")["items"]]
     assert built and all(bm["name"] in top for bm in built.values())
-    assert "registered" in result.output
     again = _build(builder, LETTERS_CONFIG, "--base", BASE_ID, "--keep-ids")
     assert again.exit_code == 0, again.output
     top_again = [i["name"] for i in load(_bookmarks_dir(builder) / "bookmarks.json")["items"]]
@@ -876,9 +875,10 @@ def test_rerender_output_says_kept_or_new(builder, tmp_path):
     cfg = _write_config(tmp_path, [{"displayName": "Letters | Old"}, {"displayName": "Letters | New"}])
     result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP, "--keep-ids")
     assert result.exit_code == 0, result.output
-    lines = [line for line in result.output.splitlines() if "bookmark.json" in line]
-    assert "(kept id): Letters | Old" in lines[0]
-    assert "(new id): Letters | New" in lines[1]
+    built = _by_display(builder)
+    assert result.output.splitlines() == [
+        f"kept {built['Letters | Old']['name']} Letters | Old",
+        f"NEW  {built['Letters | New']['name']} Letters | New"]
 
 
 def test_rerender_with_two_bookmarks_of_one_display_name_is_an_error(builder, tmp_path):
@@ -973,7 +973,9 @@ def test_a_repeated_pick_in_a_chart_well_is_an_error(builder, tmp_path):
     cfg = _write_config(tmp_path, [{"displayName": "Letters | Twice", "pickers": {
         "x_ps1": [pick], "x_selector_1": [pick]}}])
     result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP)
-    assert result.exit_code == 2 and "picked twice" in result.output
+    assert result.exit_code == 2
+    assert "Letters | Twice: 'A' is selected in both x_ps1 and x_selector_1; distribute the " \
+        "measure set across the Y parameters instead of repeating it" in result.output
 
 
 def test_a_failed_build_exits_2_and_writes_nothing(builder, tmp_path):
@@ -982,3 +984,154 @@ def test_a_failed_build_exits_2_and_writes_nothing(builder, tmp_path):
     before = _files_snapshot(builder)
     assert _build(builder, cfg, "--base", BASE_ID, "--group", GROUP).exit_code == 2
     assert _files_snapshot(builder) == before
+
+
+# -- console output and messages ------------------------------------------------------
+def test_a_build_prints_one_absolute_path_per_entry(builder):
+    result = _build(builder, LETTERS_CONFIG, "--base", BASE_ID, "--group", GROUP)
+    assert result.exit_code == 0, result.output
+    built = _by_display(builder)
+    names = [built[e["displayName"]]["name"] for e in load(LETTERS_CONFIG)]
+    assert result.output.splitlines() == [
+        str((_bookmarks_dir(builder) / f"{n}.bookmark.json").resolve()) for n in names]
+
+
+def _error(result) -> str:
+    assert result.exit_code == 2, result.output
+    return result.output
+
+
+def test_base_bookmark_messages(builder, tmp_path):
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | X"}])
+    out = _error(_build(builder, cfg, "--base", "nope"))
+    assert f"base bookmark nope not found in {_bookmarks_dir(builder)}" in out
+    toml = builder / "builder.toml"
+    toml.write_text(toml.read_text(encoding="utf-8").replace(f'base = "{BASE_ID}"', 'base = "nope"'),
+                    encoding="utf-8")
+    out = _error(_build(builder, cfg))
+    assert f"no base bookmark nope in {_bookmarks_dir(builder)}" in out
+
+
+@pytest.mark.parametrize("damage,text", [
+    ("container", "Letters | P: picker x_selector_1 (58c07edf66fcc668052a) not captured by base bookmark"),
+    ("general", "picker visual carries no general filter to rewrite"),
+    ("where", "picker visual filter has no Where clause"),
+    ("in", "picker visual filter has no In condition"),
+])
+def test_picker_messages(builder, tmp_path, damage, text):
+    def fn(data):
+        containers = _section(data)["visualContainers"]
+        vid = PICKERS["x_selector_1"]
+        if damage == "container":
+            del containers[vid]
+            return
+        merge = containers[vid]["singleVisual"]["objects"]["merge"]
+        if damage == "general":
+            del merge["general"]
+            return
+        flt = merge["general"][0]["properties"]["filter"]["filter"]
+        if damage == "where":
+            del flt["Where"]
+        else:
+            flt["Where"][0]["Condition"] = {"Comparison": {"ComparisonKind": 0}}
+    _edit_base(builder, fn)
+    pick = {"table": "T", "column": "C", "label": "C"}
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | P", "pickers": {"x_selector_1": [pick]}}])
+    assert text in _error(_build(builder, cfg, "--base", BASE_ID, "--group", GROUP))
+
+
+def test_too_many_rows_message(builder, tmp_path):
+    rows = [{"table": "_Accounts", "column": f"C{i}", "label": f"C{i}"} for i in range(5)]
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | Rows", "pickers": {"y_selector_2": rows}}])
+    assert "Letters | Rows: 5 row dimensions but only 4 dropdown filters (y-Selector 3..6) to carry them" \
+        in _error(_build(builder, cfg, "--base", BASE_ID, "--group", GROUP))
+
+
+def test_matrix_date_category_and_group_messages(builder, tmp_path):
+    _edit_base(builder, lambda d: _section(d)["visualContainers"].pop(MATRIX))
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | M"}])
+    assert "Letters | M: base bookmark does not capture the Main Matrix" in \
+        _error(_build(builder, cfg, "--base", BASE_ID, "--group", GROUP))
+    assert "bookmark group nope not found" in _error(_build(builder, cfg, "--base", BASE_ID,
+                                                            "--group", "nope"))
+
+
+@pytest.mark.parametrize("entry,name,text", [
+    ({"displayName": "L | D", "date_filter": "this_year"}, "f_date",
+     "L | D: base bookmark has no RelativeDate filter slot"),
+    ({"displayName": "L | C", "analysis_category": "Spend"}, "f_category",
+     "L | C: base bookmark has no Analysis Category filter slot"),
+])
+def test_missing_filter_slot_messages(builder, tmp_path, entry, name, text):
+    def fn(data):
+        sec = _section(data)
+        sec["filters"]["byExpr"] = [f for f in sec["filters"]["byExpr"] if f["name"] != name]
+    _edit_base(builder, fn)
+    cfg = _write_config(tmp_path, [entry])
+    assert text in _error(_build(builder, cfg, "--base", BASE_ID, "--group", GROUP))
+
+
+@pytest.mark.parametrize("n_measures,n_rows,text", [
+    (2, 1, "Spend: need >=3 measures, got 2"),
+    (3, 4, "Spend: y1 drilldown picks = 4, expected 1-3"),
+])
+def test_legacy_limit_messages(builder, tmp_path, n_measures, n_rows, text):
+    measures = [{"table": "M", "column": f"M{i}"} for i in range(n_measures)]
+    rows = [{"table": "R", "column": f"R{i}"} for i in range(n_rows)]
+    cfg = _write_config(tmp_path, [{"displayName": "Spend | L", "analysis_category": "Spend",
+                                    "pickers": {"x_selector_1": measures, "y_selector_2": rows}}])
+    assert text in _error(_build(builder, cfg, "--base", BASE_ID, "--group", GROUP, "--legacy-layout"))
+
+
+def test_build_help_texts():
+    out = " ".join(run("bookmarks", "build", "--help").output.split())
+    assert "bookmark group name to register under" in out
+    assert ("bookmark id to clone as the base state (default [bookmarks] base; prefer a bookmark "
+            "PROVEN to work in the target report)") in out
+    assert "report dir" in out
+
+
+def test_self_test(builder):
+    result = run("bookmarks", "build", "--self-test", "--report", _report(builder),
+                 "--config", builder / "builder.toml")
+    assert result.exit_code == 0, result.output
+    assert result.output == "self-test PASS\n"
+    legacy = run("bookmarks", "build", "--self-test", "--legacy-layout", "--report", _report(builder),
+                 "--config", builder / "builder.toml")
+    lines = legacy.output.splitlines()
+    assert legacy.exit_code == 0, legacy.output
+    assert lines[0] == "self-test PASS" and lines[1].startswith("  generated: ")
+    assert lines[2] == "  measures: ['Self Test A', 'Self Test B', 'Self Test C']"
+    assert lines[3] == "  matrix projections.Rows count: 1"
+    assert not list(_bookmarks_dir(builder).glob("*.bookmark.json"))[1:]
+
+
+def test_the_section_always_carries_visual_container_groups(builder, tmp_path):
+    _edit_base(builder, lambda d: _section(d).pop("visualContainerGroups"))
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | Groups"}])
+    assert _build(builder, cfg, "--base", BASE_ID, "--group", GROUP).exit_code == 0
+    sec = _section(_by_display(builder)["Letters | Groups"])
+    assert list(sec)[-1] == "visualContainerGroups" and sec["visualContainerGroups"] == {}
+
+
+def test_the_chart_capture_always_has_projections_and_parameters(builder, tmp_path):
+    def strip(data):
+        single = _section(data)["visualContainers"][CHART]["singleVisual"]
+        single.pop("projections")
+        single.pop("activeProjections")
+    _edit_base(builder, strip)
+    cfg = _write_config(tmp_path, [{"displayName": "Letters | Chart"}])
+    assert _build(builder, cfg, "--base", BASE_ID, "--group", GROUP).exit_code == 0
+    single = _section(_by_display(builder)["Letters | Chart"])["visualContainers"][CHART]["singleVisual"]
+    assert list(single)[-2:] == ["projections", "parameters"]
+    assert single["projections"] == {} and single["parameters"] == {}
+
+
+def test_legacy_emptied_picker_gets_an_empty_cached_list(builder, tmp_path):
+    _edit_base(builder, lambda d: _section(d)["visualContainers"][PICKERS["y_selector_4"]][
+        "singleVisual"].pop("cachedFilterDisplayItems"))
+    assert _build(builder, _legacy_entry(tmp_path), "--base", BASE_ID, "--group", GROUP,
+                  "--legacy-layout").exit_code == 0
+    single = _section(_by_display(builder)["Spend | Legacy"])["visualContainers"][
+        PICKERS["y_selector_4"]]["singleVisual"]
+    assert single["cachedFilterDisplayItems"] == []

@@ -41,7 +41,7 @@ from .report import (
     resolve_model_dir,
     write_zip,
 )
-from .bookmark_builder import TOP_LEVEL, BuildError, build_bookmarks, load_builder_settings
+from .bookmark_builder import BuildError, build_bookmarks, builder_self_test, load_builder_settings
 from .colors import ColorOptions, PaletteError
 from .colors import reset as color_reset
 from .colors import sync as color_sync
@@ -1205,17 +1205,19 @@ def bookmarks() -> None:
 
 
 @bookmarks.command("build")
-@click.argument("entries", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("entries", required=False,
+                type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--report", "report_dir", required=True,
               type=click.Path(exists=True, file_okay=False, path_type=Path),
-              help="The *.Report folder.")
+              help="report dir")
 @click.option("--config", "config_path", default=None,
               type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help=f"Config file with a [bookmarks] section. Default: "
               f"./{DEFAULT_CONFIG_FILENAME} if present.")
-@click.option("--base", default=None, help="Base bookmark name (overrides [bookmarks] base).")
-@click.option("--group", default=None,
-              help="bookmarks.json group to register new bookmarks in.")
+@click.option("--base", default=None,
+              help="bookmark id to clone as the base state (default [bookmarks] base; "
+              "prefer a bookmark PROVEN to work in the target report)")
+@click.option("--group", default=None, help="bookmark group name to register under")
 @click.option("--keep-ids", is_flag=True,
               help="Re-render: an existing bookmark with the entry's display name "
               "is the base and keeps its name; new ones go first in the group.")
@@ -1223,28 +1225,38 @@ def bookmarks() -> None:
               help="Single-page layout: the measures picker fills the matrix "
               "values (3 or more) and unused pickers are emptied.")
 @click.option("--dry-run", is_flag=True, help="Build everything, write nothing.")
-def bookmarks_build(entries: Path, report_dir: Path, config_path: Path | None,
+@click.option("--self-test", is_flag=True,
+              help="Build one synthetic entry from the base bookmark in memory, check "
+              "it and print self-test PASS; nothing is written.")
+def bookmarks_build(entries: Path | None, report_dir: Path, config_path: Path | None,
                     base: str | None, group: str | None, keep_ids: bool,
-                    legacy_layout: bool, dry_run: bool) -> None:
+                    legacy_layout: bool, dry_run: bool, self_test: bool) -> None:
     """Render one bookmark per entry of ENTRIES (a JSON list) into the report."""
     if config_path is None and (Path.cwd() / DEFAULT_CONFIG_FILENAME).is_file():
         config_path = Path.cwd() / DEFAULT_CONFIG_FILENAME
     try:
         settings = load_builder_settings(config_path)
+        if self_test:
+            for line in builder_self_test(report_dir, settings, base=base,
+                                          legacy=legacy_layout):
+                click.echo(line)
+            return
+        if entries is None:
+            raise StylerError("Missing argument 'ENTRIES' (a JSON list of entries).")
         result = build_bookmarks(report_dir, entries, settings, base=base, group=group,
                                  keep_ids=keep_ids, legacy=legacy_layout, dry_run=dry_run)
     except BuildError as exc:
         raise StylerError(str(exc)) from exc
-    verb = "would write" if dry_run else "wrote"
     for note in result.notes:
-        click.echo(f"  note: {note}")
+        click.echo(f"note: {note}", err=True)
     for path, display, kept in result.details:
-        origin = "kept id" if kept else "new id"
-        click.echo(f"  {verb} {path.relative_to(report_dir).as_posix()} ({origin}): {display}")
-    for group_name, names in result.registered.items():
-        where = "at the top level" if group_name == TOP_LEVEL else f"in group {group_name}"
-        click.echo(f"  registered {len(names)} bookmark(s) {where}")
-    click.echo(f"{len(result.written)} bookmark(s) {'built (dry run)' if dry_run else 'built'}.")
+        name = path.name[: -len(".bookmark.json")]
+        if keep_ids:
+            click.echo(f"kept {name} {display}" if kept else f"NEW  {name} {display}")
+        elif dry_run:
+            click.echo(f"would write {path.resolve()}")
+        else:
+            click.echo(str(path.resolve()))
 
 
 __all__ = ["main", "style", "check", "colors", "bookmarks", "CHECKS"]

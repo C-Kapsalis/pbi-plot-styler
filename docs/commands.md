@@ -146,6 +146,21 @@ preselection and, when the entry gives `y_selector_<N>` picks, points their
 column at its first pick (never a measure). They cannot be picked in an
 entry, and one the base bookmark does not capture is skipped.
 
+Output: one line per written bookmark, its absolute file path, in entry
+order and nothing else. With `--keep-ids` each line is `kept <id> <display
+name>` or `NEW  <id> <display name>` instead. Notes (such as a moved matrix
+capture) go to stderr. Error messages start with the entry's display name
+(`<display name>: base bookmark does not capture the Main Matrix`), except the
+legacy-layout limits, which start with the entry's analysis category
+(`Spend: need >=3 measures, got 2`). `--self-test` builds one synthetic entry
+from the base bookmark in memory, checks it and prints `self-test PASS`
+(the legacy layout adds the generated name, the measures and the matrix row
+count); nothing is written.
+
+The default layout always leaves a `visualContainerGroups` map on the built
+section and `projections` / `parameters` on a captured chart; the legacy
+layout always leaves an emptied picker with an empty cached list.
+
 `--dry-run` builds everything and writes nothing. Any invalid entry,
 missing picker, chart or matrix capture, filter or base stops the run with
 exit `2` before a file is written.
