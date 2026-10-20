@@ -20,10 +20,13 @@ def _targets(flt: Any, cfg: FormatSelectorSection) -> bool:
 
 
 def _selected(flt: dict) -> Any:
+    """The first non-empty literal across the In rows of the filter."""
     for where in dig(flt, "filter", "Where") or []:
-        values = dig(where, "Condition", "In", "Values")
-        if isinstance(values, list):
-            return dig(values, 0, 0, "Literal", "Value")
+        for row in dig(where, "Condition", "In", "Values") or []:
+            for cell in row if isinstance(row, list) else []:
+                value = dig(cell, "Literal", "Value")
+                if value not in (None, ""):
+                    return value
     return None
 
 
@@ -70,6 +73,9 @@ def check_format_selector(ctx: RuleContext) -> None:
         return
     cfg = ctx.settings.format_selector
     path = ctx.report_dir / "definition" / "report.json"
+    if not path.is_file():
+        ctx.skip("format-selector: the report has no definition/report.json")
+        return
     problem = _problem(read_json(path), cfg)
     ctx.checked["format-selector"] = 1
     if problem:
@@ -98,6 +104,8 @@ def fix_format_selector(ctx: RuleContext) -> list[tuple[Path, str]]:
         return []
     cfg = ctx.settings.format_selector
     path = ctx.report_dir / "definition" / "report.json"
+    if not path.is_file():
+        return []
     data = read_json(path)
     if not isinstance(data, dict) or _problem(data, cfg) is None:
         return []

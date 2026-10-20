@@ -89,7 +89,7 @@ CHECKS: dict[str, tuple[str, str]] = {
     "THM004": ("error", "hex colour literal in report.json"),
     "THM005": ("error", "neither a base nor a custom theme"),
     "THM006": ("error", "base or custom theme missing"),
-    "POS001": ("warning", "visual has no x or y position"),
+    "POS001": ("error", "visual has no x or y position"),
     "YCG001": ("error", "y-combo group badly named"),
     "YCG002": ("error", "y-combo member outside its group"),
     "PNL001": ("error", "filter-panel master group missing"),

@@ -319,7 +319,7 @@ a time with `--rule SLUG` (repeatable):
 | `slicer-mode-gates` | `GAT003` to `GAT005` | Dropdown slicers gate on `f-Slicer`, list slicers on `f-All`, bound to the table that declares them; no gate reference names another table | Writes or repoints the gates |
 | `category-filter` | `CAT001` | Menu bookmarks set the analysis-category filter | - |
 | `theme` | `THM002` to `THM006` | A theme collection with a base and a custom theme, and no hex colour literals in `report.json` | - |
-| `visual-position` | `POS001` (warning) | Every visual has an x and y position | - |
+| `visual-position` | `POS001` | Every visual has an x and y position | - |
 | `y-combo` | `YCG001`, `YCG002` | `y<N>_combo_group` naming and membership | - |
 | `filter-panel` | `PNL001`, `PNL002` | The filter slicers live in a master group named `y_filters_group` | Renames the detected group, its children's parent links and bookmark references |
 | `format-selector` | `FMT001` | A hidden, locked report filter selects the `Format` item of `z-Selector Format` (only when the model has that table) | Writes the canonical filter |

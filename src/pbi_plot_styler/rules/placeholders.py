@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from ..canvas import dig
+from ..canvas import dig, read_json
 from . import RuleContext, rewrite_json
 
 
@@ -139,9 +139,15 @@ def _collect(ctx: RuleContext) -> tuple[list[_Hit], dict[Path, Any]]:
     for visual in ctx.index.visuals():
         docs[visual.path] = visual.data
         hits.extend(_hits_in_visual(judge, visual.path, visual.data))
-    for bookmark in ctx.bookmarks:
-        docs[bookmark.path] = bookmark.data
-        hits.extend(_hits_in_bookmark(judge, bookmark.path, bookmark.data))
+    # every JSON file of the bookmarks folder that holds exploration state
+    folder = ctx.report_dir / "definition" / "bookmarks"
+    for path in sorted(folder.glob("*.json")):
+        if path.name == "bookmarks.json":
+            continue
+        data = read_json(path)
+        if isinstance(data, dict) and isinstance(data.get("explorationState"), dict):
+            docs[path] = data
+            hits.extend(_hits_in_bookmark(judge, path, data))
     return hits, docs
 
 

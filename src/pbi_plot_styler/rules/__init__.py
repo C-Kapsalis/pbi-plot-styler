@@ -86,6 +86,12 @@ class Rule:
     prepare: Callable[[RuleContext], Any] | None = None
     #: ids whose error findings make the rule non-compliant in --summary.
     critical: tuple[str, ...] = ()
+    #: ids that count toward the rule's --summary row (empty: all ``ids``).
+    summary_ids: tuple[str, ...] = ()
+
+    @property
+    def summarised(self) -> tuple[str, ...]:
+        return self.summary_ids or self.ids
 
 
 def _integrity_fix(ctx: RuleContext) -> list[tuple[Path, str]]:
@@ -112,7 +118,7 @@ def _registry() -> dict[str, Rule]:
              ("CAT001",), category.check_category_filter, critical=("CAT001",)),
         Rule("theme", "theme collection present, no hex literals",
              ("THM002", "THM003", "THM004", "THM005", "THM006"), layout.check_theme,
-             critical=("THM002", "THM004")),
+             critical=("THM002", "THM004"), summary_ids=("THM002", "THM003", "THM004")),
         Rule("visual-position", "every visual has an x and y position",
              ("POS001",), layout.check_positions),
         Rule("y-combo", "y-combo groups are named and parented",

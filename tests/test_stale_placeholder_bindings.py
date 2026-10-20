@@ -55,3 +55,21 @@ def test_ambiguous_role_is_skipped_not_failed(universal):
     assert run("check", universal, "--rule", "stale-placeholders", "--fix").exit_code == EXIT_OK
     after = (universal / "-Report.Report/definition/bookmarks/bA00000000000000000a.bookmark.json").read_bytes()
     assert after == before
+
+
+def test_other_bookmark_json_files_with_exploration_state_are_read(universal):
+    col = lambda e, p: {"Column": {"Expression": {"SourceRef": {"Entity": e}}, "Property": p}}  # noqa: E731
+    state = {"explorationState": {"activeSection": "a0b1c2d3e4f5a6b7c8d9", "sections": {
+        "a0b1c2d3e4f5a6b7c8d9": {"visualContainers": {"combo_main": {"singleVisual": {
+            "parameters": {"Series": [{"expr": col("y-Plot Specific 1", "y-Plot Specific 1"),
+                                       "index": 0, "length": 1}]},
+            "projections": {"Series": [col("#Report Measures", "z")]}}}}}}}}
+    path = universal / "-Report.Report/definition/bookmarks/exploration-state.json"
+    path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    payload = check_json(universal, "stale-placeholders")
+    hits = of(payload, "STALE")
+    assert [h["file"].rsplit("/", 1)[-1] for h in hits] == ["exploration-state.json"]
+    assert run("check", universal, "--rule", "stale-placeholders", "--fix").exit_code == EXIT_OK
+    fixed = json.loads(path.read_text(encoding="utf-8"))
+    assert fixed["explorationState"]["sections"]["a0b1c2d3e4f5a6b7c8d9"]["visualContainers"][
+        "combo_main"]["singleVisual"]["projections"]["Series"][0]["Column"]["Property"] == "z_space"

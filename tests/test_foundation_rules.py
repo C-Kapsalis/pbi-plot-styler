@@ -137,3 +137,38 @@ def test_rule_8_does_not_apply_without_groups(universal, report_context):
     payload = check_json(report_context, "filter-panel")
     assert payload["exit_code"] == EXIT_OK
     assert not payload["findings"]
+
+
+# -- format selector, placeholders and y-combo details --------------------------------
+def test_the_format_selector_reads_the_first_non_empty_literal(universal, report_context):
+    path = report_context / "definition" / "report.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    flt = next(f for f in data["filterConfig"]["filters"] if f["field"]["Column"]["Property"] == "Selector Format")
+    values = flt["filter"]["Where"][0]["Condition"]["In"]["Values"]
+    flt["filter"]["Where"][0]["Condition"]["In"]["Values"] = [[{"Literal": {"Value": ""}}]] + values
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    payload = check_json(report_context, "format-selector")
+    assert not of(payload, "FORMAT"), payload["findings"]
+
+
+def test_a_missing_report_json_makes_the_format_rule_not_apply(universal, report_context):
+    (report_context / "definition" / "report.json").unlink()
+    payload = check_json(report_context, "format-selector")
+    assert not of(payload, "FORMAT")
+    assert any("report.json" in n for n in payload["skipped"])
+
+
+def test_an_invalid_report_json_is_a_format_finding(universal, report_context):
+    (report_context / "definition" / "report.json").write_text("{", encoding="utf-8")
+    payload = check_json(report_context, "format-selector")
+    assert of(payload, "FORMAT")
+
+
+def test_a_y_combo_member_needs_a_name_after_the_prefix(universal, report_context):
+    from canvas_variants import _edit, _load, _save, _v
+    d = _load(_v(universal, "y1_values"))
+    d["name"] = "y2_"
+    d.pop("parentGroupName", None)
+    _save(_v(universal, "y2_"), d)
+    payload = check_json(report_context, "y-combo")
+    assert "y2_" not in [f["subject"] for f in payload["findings"]]

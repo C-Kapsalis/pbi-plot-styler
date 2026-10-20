@@ -984,7 +984,7 @@ def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> d
     rows = []
     for slug in SUMMARY_RULES:
         rule = registry[slug]
-        own = [f for f in findings if f.check_id in rule.ids]
+        own = [f for f in findings if f.check_id in rule.summarised]
         critical = [f for f in own if f.check_id in rule.critical and f.severity == "error"]
         total = checked.get(slug, 0)
         failing = len({f.location for f in critical})
@@ -1020,7 +1020,7 @@ def _compliance_text(compliance: dict, findings: list[Finding]) -> str:
         lines.append(f"- **{status}** `{row['rule']}`: {row['title']} "
                      f"({row['passed']}/{row['checked']} passed)")
         for f in findings:
-            if f.check_id in registry[row["rule"]].ids:
+            if f.check_id in registry[row["rule"]].summarised:
                 lines.append(f"  - {f.severity} {f.check_id} {f.subject}: {f.message}")
                 lines.append(f"    fix: {fix_hint(f.check_id)}")
     lines.append("")

@@ -212,7 +212,7 @@ def test_fpm001_subject_drops_the_slot_but_keeps_one_finding_per_slot(tmp_path):
 def test_summary_is_not_compliant_while_errors_exist(tmp_path):
     client = copy_fixture("universal", tmp_path)
     report_json = client / "-Report.Report" / "definition" / "report.json"
-    edit_json(report_json, lambda d: d["themeCollection"].pop("customTheme"))
+    edit_json(report_json, lambda d: d.update(objects={"outspace": [{"properties": {"hexColor": "#1A2B3C"}}]}))
     result = run("check", client, "--summary", "--json")
     payload = json.loads(result.output)
     compliance = payload["compliance"]
@@ -222,3 +222,18 @@ def test_summary_is_not_compliant_while_errors_exist(tmp_path):
     assert theme["compliant"] is False
     text = run("check", client, "--summary").output
     assert "**FAIL** `theme`" in text
+
+
+def test_summary_theme_row_counts_only_the_rule_6_checks(tmp_path):
+    client = copy_fixture("universal", tmp_path)
+    report_json = client / "-Report.Report" / "definition" / "report.json"
+    edit_json(report_json, lambda d: d["themeCollection"].pop("customTheme"))
+    compliance = json.loads(run("check", client, "--summary", "--json").output)["compliance"]
+    theme = next(r for r in compliance["rules"] if r["rule"] == "theme")
+    assert theme["compliant"] is True
+    assert (theme["errors"], theme["warnings"]) == (0, 1)
+    assert compliance["overall_compliance"] is True
+    assert (compliance["errors"], compliance["warnings"]) == (0, 1)
+    # the both-themes check still runs under --rule theme
+    payload = json.loads(run("check", client, "--rule", "theme", "--json").output)
+    assert "THM006" in {f["id"] for f in payload["findings"]}

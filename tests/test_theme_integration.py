@@ -63,4 +63,5 @@ def test_visual_missing_y_position(universal, report_context):
     payload = check_json(report_context, "visual-position")
     hits = of(payload, "POSITION")
     assert [h["subject"] for h in hits] == ["card_total"]
-    assert hits[0]["severity"] == "warning"
+    assert hits[0]["severity"] == "error"
+    assert payload["exit_code"] == 1

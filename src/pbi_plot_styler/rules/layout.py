@@ -69,7 +69,8 @@ def check_positions(ctx: RuleContext) -> None:
 
 
 _GROUP_NAME = re.compile(r"y\d+_combo_group")
-_MEMBER_NAME = re.compile(r"y\d+_(.*)", re.DOTALL)
+#: a member needs at least one character after ``y<N>_``
+_MEMBER_NAME = re.compile(r"y\d+_(.+)", re.DOTALL)
 
 
 def check_y_combo(ctx: RuleContext) -> None:

@@ -154,15 +154,18 @@ bookmarks when no group lists any) never filters
 - `THM005` (error): neither a base nor a custom theme.
 - `THM006` (error): the base or the custom theme is missing (names which).
 
+`--summary` counts only `THM002`, `THM003` and `THM004` in the theme row.
+
 ## visual-position
 
-`POS001` (warning): a visual has no `position.x` or `position.y`.
+`POS001` (error): a visual has no `position.x` or `position.y`.
 
 ## y-combo
 
 - `YCG001`: a group named like a y-combo group does not match
   `y<N>_combo_group` exactly.
-- `YCG002`: a `y<N>_*` member is not inside an existing `y<N>_combo_group`.
+- `YCG002`: a `y<N>_*` member (at least one character after `y<N>_`) is not
+  inside an existing `y<N>_combo_group`.
 
 ## filter-panel
 
@@ -188,7 +191,10 @@ text as `\u` escapes. An existing folder with the target name stops the fix
 Active only when the paired model has the `format_selector.table`.
 `FMT001`: `report.json` does not hold exactly one filter on the format
 selector column that selects `'Format'` and is hidden and locked in view mode
-(the message names the first failing condition). `--fix` replaces the
+(the message names the first failing condition). The selected item is the
+first non-empty literal across the filter's In rows. A report without
+`definition/report.json` is skipped as not applicable; an unreadable one is
+a finding. `--fix` replaces the
 targeting filters with one canonical filter at the front, keeping the first
 filter's name.
 
@@ -197,7 +203,9 @@ filter's name.
 Each dimension selector offers one blank-dimension placeholder column
 (`NAMEOF('#Report Measures'[z])`). `PLH001`: a visual role or bookmark capture
 bound to `y-*` selectors projects a placeholder those selectors do not offer
-(bookmark captures also check their `byExpr` filters and `orderBy`). Roles
+(bookmark captures also check their `byExpr` filters and `orderBy`; every
+JSON file of the bookmarks folder holding exploration state is read, except
+`bookmarks.json`). Roles
 whose selectors offer several placeholders are skipped as ambiguous. `--fix`
 sets the offered placeholder and updates `queryRef` / `nativeQueryRef`.
 

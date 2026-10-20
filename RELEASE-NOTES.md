@@ -22,7 +22,7 @@
     theme), `THM004` (hex colour literals in `report.json`, with count and
     samples), `THM005` (no base or custom theme), `THM006` (base or custom
     theme missing).
-  - `visual-position`: `POS001` (warning), a visual without x or y.
+  - `visual-position`: `POS001`, a visual without x or y (an error).
   - `y-combo`: `YCG001` (badly named `y<N>_combo_group`), `YCG002` (member
     outside its group).
   - `filter-panel`: `PNL001` (no `y_filters_group`), `PNL002` (warning, not a
@@ -307,6 +307,16 @@
 - BUGFIX (kept): `slicer-mode-gates` still repoints the `From` list of a
   stale gate filter, but only the alias a gate reference uses or an entry
   naming the stale table; unrelated sources are left alone.
+- `--summary`: the theme row counts only `THM002`, `THM003` (warning) and
+  `THM004` toward its compliance and the totals; `THM005` / `THM006` still
+  run under `--rule theme`.
+- `format-selector` reads the selected item as the first non-empty literal
+  across the In rows; a report without `definition/report.json` is noted as
+  not applicable (an unreadable or invalid one is still `FMT001`).
+- `stale-placeholders` also reads the other JSON files of the bookmarks
+  folder that hold exploration state (`bookmarks.json` excepted).
+- `y-combo`: a member name needs at least one character after
+  `y<N>_`.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and
