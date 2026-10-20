@@ -1,22 +1,18 @@
-"""
-Whole-page answer bookmarks: bookmark, visual-capture and page level.
+"""Whole-page answer bookmarks: bookmark, visual-capture and page level.
 
-Ported from the author's layer-3.5 suite. The levels say where the fix goes:
+The levels say where the fix goes:
 
   bookmark level   (T1, T7, T8)            the bookmark's own options and registration
   capture level    (T3, T4, T5, T9, T10)   what the bookmark persists per visual
   page level       (P1, P2, P3)            the page definition; no bookmark overrides it
 
 Scope: whole-page category bookmarks named '<Analysis Category> | <Aspect>' on
-the stand-in report tests/fixtures/spinout_02_db/-Insights.Report. The
-stand-in reuses the original page and visual ids, so the original suite and the
-tool read the same objects (parity-expected.json records the original's
-verdicts on the stand-in and on every defect variant).
+the sample report tests/fixtures/spinout_02_db/-Insights.Report.
 
 A RATCHET, not a list of exceptions: accepted findings live in a generated
 baseline (tests/baselines/whole_page_bookmark_floors.json, styler
 ``--update-baseline`` format) and each test fails only on findings NOT in it.
-On the stand-in the baseline accepts one T1 finding ("CRM Deals | Owners", a
+On the sample the baseline accepts one T1 finding ("CRM Deals | Owners", a
 bookmark saved by the service with a visual selected).
 
 Every test runs twice: once with the page / visual ids configured, once with
@@ -34,7 +30,7 @@ from answer_bookmark_variants import (
     CATEGORY_PREFIXES, INHERITED, MAIN_PAGE, MATRIX, PARAM_SLICER, ROW_DROPDOWNS,
     VARIANTS, no_prefix_match,
 )
-from ported_helpers import (
+from cli_helpers import (
     BASELINES, EXIT_FINDINGS, EXIT_OK, FIXTURES, IDS, check_json, of, run, write_toml,
 )
 
@@ -100,7 +96,7 @@ def suite(report: Path, baseline: Path, tmp_path: Path, mode: str):
 
 
 def _fresh(payload: dict, key: str) -> list[dict]:
-    """The _ratchet of the original: findings for one check not in the baseline."""
+    """The ratchet: findings for one check that are not in the baseline."""
     return of(payload, key, new_only=True)
 
 
@@ -121,7 +117,7 @@ class TestBookmarkLevel:
         assert all(f["baselined"] for f in accepted)
 
     def test_t1_without_the_baseline_fails(self, suite):
-        """Original verdict with an empty baseline: fail (one T1 finding)."""
+        """With an empty baseline: fail (one T1 finding)."""
         answer, _ = suite(with_baseline=False)
         assert answer["exit_code"] == EXIT_FINDINGS
         assert [f["subject"] for f in of(answer, "T1")] == ["CRM Deals | Owners"]
@@ -189,7 +185,7 @@ def test_the_gates_own_something(suite):
 
 @pytest.mark.p1
 def test_vacuity_guard_fails_when_no_bookmark_matches(report, baseline, tmp_path, mode):
-    """Original verdict when no bookmark matches the prefixes: fail."""
+    """When no bookmark matches the prefixes: fail."""
     no_prefix_match(report)
     config = _config(tmp_path / "plotstyler.toml", mode)
     answer = check_json(report, "answer-bookmarks", "--baseline", baseline, config=config)
@@ -207,10 +203,10 @@ def test_vacuity_guard_fails_when_prefixes_change(report, baseline, tmp_path, mo
     assert len(of(answer, "vacuity")) == 1
 
 
-# -- defect variants (one defect each; original verdict recorded per variant) ----
+# -- defect variants (one defect each) --------------------------------------------
 @pytest.mark.parametrize("variant", sorted(VARIANTS))
 def test_defect_variant_is_reported(variant, report, suite):
-    mutate, _original, expected = VARIANTS[variant]
+    mutate, _failing_test, expected = VARIANTS[variant]
     mutate(report)
     answer, slots = suite()
     got = {}
@@ -242,7 +238,7 @@ def test_update_baseline_captures_and_reports_healed(report, tmp_path, mode):
 
 
 def test_missing_baseline_file_is_a_usage_error(report, tmp_path, mode):
-    """Kept stricter than the original (which treated it as empty)."""
+    """Deliberately strict: this case is not treated as empty."""
     config = _config(tmp_path / "plotstyler.toml", mode)
     result = run("check", report, "--rule", "answer-bookmarks", "--config", config,
                  "--baseline", tmp_path / "absent.json")

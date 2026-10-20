@@ -1,10 +1,10 @@
 """Report-root discovery must descend, or every report-layer count silently lies.
 
-Ported from the author's layer-3.5 suite. A client may nest report trees in
+A client may nest report trees in
 subfolders (for example `spinout_10_db/Finalized/`). A model-sibling
 `glob("*.Report")` misses them, and because callers gate destructive work on
 the COUNTS these helpers return, a shallow glob answers 0 for a measure that
-nested reports still render. Stand-in: tests/fixtures/spinout_10_db
+nested reports still render. Sample client: tests/fixtures/spinout_10_db
 (Growth.SemanticModel, -Report.Report, Finalized/Weekly.Report).
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ def test_iter_report_roots_descends_into_nested_report_trees():
 
 def test_no_shallow_report_glob_in_scripts():
     """No call site in the tool's own package may discover reports with a
-    model-sibling-only glob (the original linted its scripts/ folder)."""
+    model-sibling-only glob."""
     package = Path(pbi_plot_styler.__file__).parent
     offenders = []
     for py in sorted(package.rglob("*.py")):

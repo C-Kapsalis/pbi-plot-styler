@@ -1,6 +1,6 @@
 """F-bookmark-picker-literals: ``check --rule bookmark-literals`` and T6.
 
-New tests (no original pytest test). Fixture ``fixtures/picker-literals``:
+Fixture ``fixtures/picker-literals``:
 ``x-Selector 1`` registers ``NAMEOF([Revenue])`` (home ``Sales Measures``),
 ``y-Selector 2`` registers ``NAMEOF('Stores'[Region])``. Bookmark
 ``Sales | Revenue`` captures the x picker selecting Revenue (OK) and the y
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from ported_helpers import IDS, check_json, copy_fixture, dump, load, of, write_toml
+from cli_helpers import IDS, check_json, copy_fixture, dump, load, of, write_toml
 
 PAGE = "5a5b5c5d5e5f50515253"
 BOOKMARK = "c1c1c1c1c1c1c1c1c1c1"

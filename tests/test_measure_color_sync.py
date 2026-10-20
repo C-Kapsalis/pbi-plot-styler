@@ -1,6 +1,6 @@
 """F-measure-color-sync: ``colors sync`` / ``colors reset`` from a palette measure.
 
-New tests (no original pytest test). Fixture ``fixtures/color-sync``: palette
+Fixture ``fixtures/color-sync``: palette
 measure ``'w-Colors'[c-Measure Color]`` with offset 0, modulus 3, base 1 and
 slots 1..3; picker ``x-Selector 1`` rows Revenue (order 1) and Orders (order 2),
 so Revenue gets slot 2 (``#222222``) and Orders slot 3 (``#333333``).
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from ported_helpers import copy_fixture, load, run
+from cli_helpers import copy_fixture, load, run
 
 PAGE = "aa11bb22cc33dd44ee55"
 # 0: done, or nothing to do; 1: a dry run found changes to make; 2: usage error

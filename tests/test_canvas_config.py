@@ -1,13 +1,13 @@
 """Report discovery shared by the canvas rules (F-canvas-config).
 
-The original conftest parametrized one test per *.Report of the registry
-client, excluded the API-only report family (M.Report, -M.Report) from
-default and model-filtered sweeps, and included it only when targeted
-explicitly; nothing matching was a skip, never a pass.
+Every *.Report of the sample client is checked, except the API-only report
+family (M.Report, -M.Report), which default and model-filtered sweeps exclude
+and which is included only when targeted explicitly; nothing matching is a
+skip, never a pass.
 """
 from __future__ import annotations
 
-from ported_helpers import EXIT_USAGE, check_json, run, universal  # noqa: F401
+from cli_helpers import EXIT_USAGE, check_json, run, universal  # noqa: F401
 
 
 def test_default_sweep_excludes_the_api_only_report(universal):
@@ -27,7 +27,7 @@ def test_explicit_target_includes_the_api_only_report(universal):
 
 
 def test_nested_reports_are_discovered(tmp_path):
-    from ported_helpers import copy_fixture
+    from cli_helpers import copy_fixture
     client = copy_fixture("spinout_10_db", tmp_path)
     payload = check_json(client, "theme")
     assert sorted(payload["reports"]) == ["-Report.Report", "Finalized/Weekly.Report"]

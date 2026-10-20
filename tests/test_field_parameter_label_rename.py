@@ -1,6 +1,6 @@
 """F-field-parameter-label-rename: ``rename-label CLIENT_DIR --pair OLD NEW [--apply]``.
 
-New tests (no original pytest test). Fixture ``fixtures/label-rename/client``:
+Fixture ``fixtures/label-rename/client``:
 label ``"Cost/ New Customer"`` in ``x-Selector 1`` and in two bookmarks;
 ``"Cohort Cost/ New Customer"`` (selector row and a card label) must stay.
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ported_helpers import copy_fixture, run
+from cli_helpers import copy_fixture, run
 
 OLD, NEW = "Cost/ New Customer", "CAC"
 LONGER = "Cohort Cost/ New Customer"

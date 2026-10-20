@@ -1,17 +1,16 @@
-"""
-y-combo naming and hierarchy (ported from the author's layer-3.5 suite).
+"""y-combo naming and hierarchy.
 
 Every y-combo group is named y<N>_combo_group, and every y<N>_* member is
 parented to an existing group (``--rule y-combo``, F-y-combo-group-naming).
-The original skips when the report has no y-combo groups; the rule reports
-that as skipped. Stand-in: tests/fixtures/universal.
+A report without y-combo groups is reported as skipped. Sample client:
+tests/fixtures/universal.
 """
 from __future__ import annotations
 
 import pytest
 
 from canvas_variants import VARIANTS
-from ported_helpers import (  # noqa: F401  (fixtures imported for registration)
+from cli_helpers import (  # noqa: F401  (fixtures imported for registration)
     EXIT_FINDINGS, EXIT_OK, check_json, of, report_context, universal,
 )
 
@@ -27,7 +26,7 @@ class TestYComboArchitecture:
     @pytest.mark.p1
     def test_y_combo_component_structure(self, report_context):
         payload = check_json(report_context, "y-combo")
-        assert not _skipped(payload, "naming"), "stand-in must hold a y-combo group"
+        assert not _skipped(payload, "naming"), "the sample must hold a y-combo group"
         assert not of(payload, "YCOMBO-name"), payload["findings"]
 
     @pytest.mark.p1
@@ -37,7 +36,7 @@ class TestYComboArchitecture:
         assert not of(payload, "YCOMBO-orphan"), payload["findings"]
 
 
-# -- variants (original verdicts recorded in parity-expected.json) ---------------
+# -- variants (one defect each) ---------------------------------------------------
 def test_badly_named_group(universal, report_context):
     VARIANTS["ycombo-bad-name"](universal)
     payload = check_json(report_context, "y-combo")

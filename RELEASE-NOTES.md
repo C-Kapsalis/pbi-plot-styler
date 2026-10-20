@@ -173,12 +173,11 @@
   (`ABK004` fingerprints, `ABK005`, `ABK006`, `ABK009`) add a suffix to the
   display-name subject so each is its own finding.
 - `bookmarks build` has no built-in well map: the `[bookmarks] wells` table
-  lists the pickers of each well (the ported fixture maps the matrix values
-  to one picker, where the spec's default named three, because its entries
-  pick the same measure in two pickers of that well). Pickers an entry does
-  not mention keep the base bookmark's selection. The legacy layout empties
-  unmentioned pickers but does not re-sync the values slicers to the first
-  pick.
+  lists the pickers of each well (the example fixture maps the matrix values
+  to one picker, because its entries pick the same measure in two pickers of
+  that well). Pickers an entry does not mention keep the base bookmark's
+  selection. The legacy layout empties unmentioned pickers and re-syncs only
+  the values slicers named in `legacy_values_slicers`.
 
 ## v1.1.0, 2026-10-12
 

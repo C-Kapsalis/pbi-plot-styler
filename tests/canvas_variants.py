@@ -1,9 +1,8 @@
-"""Defect variants of the stand-in client folder tests/fixtures/universal.
+"""Defect variants of the sample client folder tests/fixtures/universal.
 
-The base stand-in is compliant with every canvas rule (the original suite
-passes on it; the combo imposition skips without autofix). Each variant
-injects one defect into a copy of the client folder. The same functions were
-used to record the original suite's verdicts (parity-expected.json).
+The base sample is compliant with every canvas rule (the combo imposition
+skips without a fix). Each variant injects one defect into a copy of the
+client folder.
 
 Pure data helpers: no tool imports.
 """

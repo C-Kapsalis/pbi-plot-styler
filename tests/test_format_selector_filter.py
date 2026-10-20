@@ -1,14 +1,12 @@
-"""
-z-Selector Format report-level filter (ported from the author's layer-3.5 suite).
+"""z-Selector Format report-level filter.
 
 Every report must carry a hidden + locked report-level filter selecting the
 'z-Selector Format'[Selector Format] = "Format" calculation item; without it
 measures fall back to their raw format strings (``--rule format-selector``,
 F-format-selector-filter).
 
-Original outcomes: clean -> pass; incomplete -> patched (autofix) -> pass;
-patch did not help -> fail. The port always runs the autofix path on a tmp
-copy: check -> check --fix -> re-check clean.
+Expected outcomes: clean -> pass; incomplete -> patched -> pass. Each case
+runs on a tmp copy: check -> check --fix -> re-check clean.
 """
 from __future__ import annotations
 
@@ -17,7 +15,7 @@ import json
 import pytest
 
 from canvas_variants import VARIANTS
-from ported_helpers import (  # noqa: F401  (fixtures imported for registration)
+from cli_helpers import (  # noqa: F401  (fixtures imported for registration)
     EXIT_FINDINGS, EXIT_OK, check_json, of, report_context, run, universal,
 )
 
@@ -47,11 +45,11 @@ class TestFormatSelectorFilter:
 def test_incomplete_filter_is_patched(universal, report_context, variant, reason):
     VARIANTS[variant](universal)
     first = check_json(report_context, "format-selector")
-    assert first["exit_code"] == EXIT_FINDINGS        # original verdict, PBI_AUTOFIX=0
+    assert first["exit_code"] == EXIT_FINDINGS        # findings before the fix
     hits = of(first, "FORMAT")
     assert len(hits) == 1 and reason.lower() in hits[0]["message"].lower()
     fix = run("check", report_context, "--rule", "format-selector", "--fix")
-    assert fix.exit_code == EXIT_OK, fix.output       # original verdict, PBI_AUTOFIX=1
+    assert fix.exit_code == EXIT_OK, fix.output       # clean after the fix
     second = check_json(report_context, "format-selector")
     assert second["exit_code"] == EXIT_OK
     kept = _filters(report_context)

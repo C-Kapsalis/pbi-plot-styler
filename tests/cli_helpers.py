@@ -1,7 +1,6 @@
-"""Shared helpers for the ported layer-3.5 report tests.
+"""Shared helpers for the report-architecture tests.
 
-These tests were ported from the author's own report-architecture suite. They
-drive pbi-plot-styler through its public surface only:
+They drive pbi-plot-styler through its public surface only:
 
 * the ``check`` command with ``--rule <slug>`` (one rule at a time),
   ``--config <plotstyler.toml>``, ``--json``, ``--fix``, ``--baseline`` and
@@ -188,7 +187,7 @@ def visual_files(report: Path) -> Iterable[Path]:
 
 
 # -- report discovery (F-canvas-config) ---------------------------------------
-#: The stand-in registry client: tests/fixtures/universal holds
+#: The sample client: tests/fixtures/universal holds
 #: Performance.SemanticModel, -Report.Report (deliverable) and M.Report
 #: (API-only, excluded from default sweeps).
 UNIVERSAL = "universal"
@@ -196,12 +195,12 @@ UNIVERSAL = "universal"
 
 @pytest.fixture
 def universal(tmp_path: Path) -> Path:
-    """A writable copy of the stand-in client folder."""
+    """A writable copy of the sample client folder."""
     return copy_fixture(UNIVERSAL, tmp_path)
 
 
 @pytest.fixture
 def report_context(universal: Path) -> Path:
-    """The deliverable report of the stand-in client (replaces the original
-    per-report parser fixture; the styler discovers reports itself)."""
+    """The deliverable report of the sample client (the styler discovers
+    reports itself, so no per-report parser fixture is needed)."""
     return universal / "-Report.Report"

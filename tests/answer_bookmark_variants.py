@@ -1,10 +1,7 @@
-"""Defect variants of the answer-bookmark stand-in report.
+"""Defect variants of the answer-bookmark sample report.
 
-The stand-in (tests/fixtures/spinout_02_db/-Insights.Report) reuses the page
-and visual ids of the original whole-page bookmark suite. Each variant below
-injects exactly one defect into a copy of it. The same functions were used to
-record the original suite's verdicts (see parity-expected.json), so the ported
-tests and the original agree on the same files.
+Each variant below injects exactly one defect into a copy of the sample
+report (tests/fixtures/spinout_02_db/-Insights.Report).
 
 Pure data helpers: no tool imports.
 """
@@ -195,12 +192,11 @@ def p3_range(report: Path) -> None:
                         ("x-Selector 2", 3, 2)])
 
 
-#: variant -> (mutation, the original test it makes fail, expected new findings
-#: as {IDS key: count}). The p3-two-slot-overlap and p3-same-entity variants
-#: change the declared Values parameters, so the original also fails T9 for
-#: both answer bookmarks (recorded verdict). Counts are what the original suite reports for the
-#: variant (one entry per string it would collect), except P3 where the spec
-#: fixes the counts (DECISIONS stricter rule) -- see PORT-LOG.
+#: variant -> (mutation, the test it makes fail, expected new findings as
+#: {IDS key: count}). The p3-two-slot-overlap and p3-same-entity variants
+#: change the declared Values parameters, so T9 also fails for both answer
+#: bookmarks. Counts are one per finding subject; for P3 each overlapping slot
+#: is its own finding (the stricter FPM001 rule).
 VARIANTS: dict[str, tuple[Callable[[Path], None], str, dict[str, int]]] = {
     "t1-unscoped": (t1_unscoped, "TestBookmarkLevel::test_t1_targets_all_visuals", {"T1": 1}),
     "t1-missing-key": (t1_missing_key, "TestBookmarkLevel::test_t1_targets_all_visuals", {"T1": 1}),

@@ -99,7 +99,7 @@ def test_all_forms_together_on_a_real_file(tmp_path):
 @pytest.mark.p0
 @pytest.mark.layer3_5
 def test_column_bindings_are_never_touched():
-    """The original guarantee still holds: Column nodes stay untouched even
+    """The basic guarantee still holds: Column nodes stay untouched even
     when a column shares a measure's name."""
     node = {"Column": {"Expression": {"SourceRef": {"Entity": TABLE}},
                        "Property": OLD}}

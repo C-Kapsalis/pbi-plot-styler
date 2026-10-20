@@ -1,7 +1,7 @@
 """F-slicer-mode-gates: fictional cases 1-6 (``check --rule slicer-mode-gates [--fix]``).
 
-New tests; the original template-page-scope test is ported in
-test_template_page_scope.py. Fixture ``fixtures/mode-gates``: canvas page
+Page scoping of the gates is covered in test_template_page_scope.py.
+Fixture ``fixtures/mode-gates``: canvas page
 (pivotTable + lineStackedColumnComboChart) with a compliant dropdown slicer,
 a Basic (list) slicer without a gate, a Between slicer, and a dropdown slicer
 whose active gate is bound to ``w-Visuals Filters``; the bookmark carries a
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from ported_helpers import IDS, check_json, copy_fixture, load, of, run
+from cli_helpers import IDS, check_json, copy_fixture, load, of, run
 
 PAGE = "6c6d6e6f606162636465"
 

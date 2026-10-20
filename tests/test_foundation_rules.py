@@ -1,18 +1,15 @@
-"""
-Canvas foundation rules (ported from the author's layer-3.5 suite).
+"""Canvas foundation rules.
 
   Rule 1  selector slicers carry an active visual-level f-Slicer gate   (--rule slicer-gates)
   Rule 3  answer bookmarks set the Analysis Category filter             (--rule category-filter)
   Rule 6  theme collection present, no hex literals in report.json      (--rule theme)
   Rule 8  the filter slicers live in a master group y_filters_group     (--rule filter-panel)
 
-Rules 2, 4, 5 and 7 were dropped in the original and are not ported.
+Rules 2, 4, 5 and 7 are not part of the tool.
 
-The original parametrized one test per discovered report of the registry
-client; here the stand-in client is tests/fixtures/universal (deliverable
--Report.Report; the API-only M.Report is excluded from default sweeps).
-The original's autofix branch (PBI_AUTOFIX=1: fix, then re-validate) is
-always exercised on a tmp copy: check -> check --fix -> re-check.
+The sample client is tests/fixtures/universal (deliverable -Report.Report;
+the API-only M.Report is excluded from default sweeps). Each rule runs on a
+tmp copy: check -> check --fix -> re-check.
 """
 from __future__ import annotations
 
@@ -21,7 +18,7 @@ import json
 import pytest
 
 from canvas_variants import VARIANTS
-from ported_helpers import (  # noqa: F401  (fixtures imported for registration)
+from cli_helpers import (  # noqa: F401  (fixtures imported for registration)
     EXIT_FINDINGS, EXIT_OK, IDS, check_json, errors, of, report_context, run, universal,
 )
 
@@ -39,7 +36,7 @@ def _critical(payload: dict, keys) -> list[dict]:
 
 
 def _check_fix_recheck(report, rule: str, keys) -> None:
-    """The original imposition path: critical -> fix -> zero residual."""
+    """The imposition path: critical -> fix -> zero residual."""
     fix = run("check", report, "--rule", rule, "--fix")
     assert fix.exit_code == EXIT_OK, fix.output
     assert not _critical(check_json(report, rule), keys)
@@ -71,7 +68,7 @@ class TestFoundationRules:
 
     @pytest.mark.p2
     def test_foundation_rules_comprehensive_report(self, report_context):
-        """Reporting only (never fails in the original): the summary covers 4 rules."""
+        """Reporting only (never fails): the summary covers 4 rules."""
         result = run("check", report_context, "--summary", "--json")
         payload = json.loads(result.output)
         summary = payload["compliance"]
@@ -83,7 +80,7 @@ class TestFoundationRules:
         assert summary["overall_compliance"] is True
 
 
-# -- variants (original verdict recorded with PBI_AUTOFIX=0 and =1) --------------
+# -- variants (check, then fix, then re-check) ------------------------------------
 def test_rule_1_ungated_slicer_is_reported_then_fixed(universal, report_context):
     VARIANTS["rule1-ungated"](universal)
     payload = check_json(report_context, "slicer-gates")

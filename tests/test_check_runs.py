@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
-from ported_helpers import check_json, copy_fixture, edit_json, load, run
+from cli_helpers import check_json, copy_fixture, edit_json, load, run
 
 from pbi_plot_styler.check import ReportContext, _check_field_parameter_slots
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ported_helpers import FIXTURES, check_json, copy_fixture, run
+from cli_helpers import FIXTURES, check_json, copy_fixture, run
 
 BOM = b"\xef\xbb\xbf"
 TEXT_SUFFIXES = {".json", ".tmdl", ".pbir", ".pbism", ".platform", ".toml"}

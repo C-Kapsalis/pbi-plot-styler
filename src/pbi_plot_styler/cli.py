@@ -65,7 +65,7 @@ class StylerError(click.ClickException):
 class DefaultCommandGroup(click.Group):
     """A group that runs ``style`` when the first argument is not a command.
 
-    This keeps the original ``pbi-plot-styler REPORT_DIR [OPTIONS]`` form
+    This keeps the classic ``pbi-plot-styler REPORT_DIR [OPTIONS]`` form
     working unchanged. A report folder literally named like a command
     (``check``) must be passed as ``./check`` or after ``style``.
     """

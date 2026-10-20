@@ -1,16 +1,15 @@
-"""
-Theme integration and visual placement (ported from the author's layer-3.5 suite).
+"""Theme integration and visual placement.
 
 THEME-ANY / THEME-BOTH / THEME-CUSTOM-MISSING are findings of ``--rule theme``
 (F-theme-integration); visual x/y presence is ``--rule visual-position``
-(F-visual-position-present). Stand-in: tests/fixtures/universal.
+(F-visual-position-present). Sample client: tests/fixtures/universal.
 """
 from __future__ import annotations
 
 import pytest
 
 from canvas_variants import VARIANTS
-from ported_helpers import (  # noqa: F401  (fixtures imported for registration)
+from cli_helpers import (  # noqa: F401  (fixtures imported for registration)
     EXIT_FINDINGS, EXIT_OK, check_json, of, report_context, universal,
 )
 
@@ -36,7 +35,7 @@ class TestThemeIntegration:
         assert not of(check_json(report_context, "theme"), "THEME-BOTH")
 
 
-# -- variants (original verdicts recorded in parity-expected.json) ---------------
+# -- variants (one defect each) ---------------------------------------------------
 def test_base_theme_only(universal, report_context):
     VARIANTS["theme-base-only"](universal)
     payload = check_json(report_context, "theme")

@@ -1,13 +1,12 @@
 """F-combo-line-format: stale line rebind and the formatting rebuild.
 
-New tests (the rebind rule is pinned by no original test; the original
-``test_impose_combo_chart_format`` is ported in test_combo_line_format.py).
+The end-to-end run over a client folder is in test_combo_line_format.py.
 Model ``fixtures/shop-combo``: table ``Shop Measures`` with ``Revenue``,
 ``Basket Size``, ``Avg Basket Size``, ``Qualifier Margin``, ``Clicks``;
 selector ``x-Plot Specific 2`` offers Revenue, Qualifier Margin and
 Avg Basket Size (and one column, which falls away).
 
-Parity configuration: ``--rebind-stale-line --theme-color-id 9
+Reference configuration: ``--rebind-stale-line --theme-color-id 9
 --theme-color-percent 0`` with ``[style] touch_existing_label_default = false``
 and the seeded default labels properties of the spec.
 """
@@ -18,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from ported_helpers import copy_fixture, dump, load, run, write_toml
+from cli_helpers import copy_fixture, dump, load, run, write_toml
 
 TABLE = "Shop Measures"
 THEME9 = {"solid": {"color": {"expr": {"ThemeDataColor": {"ColorId": 9, "Percent": 0}}}}}

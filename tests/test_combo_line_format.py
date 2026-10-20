@@ -1,19 +1,13 @@
-"""
-Combo-chart line formatting (IMPOSED, not asserted), ported from the author's
-layer-3.5 suite.
+"""Combo-chart line formatting over a whole client folder (imposed, not asserted).
 
-The original ran its formatter over the whole CLIENT folder of the
-parametrized report, once per client per session, only with PBI_AUTOFIX=1,
-and passed when it exited 0. The port runs ``pbi-plot-styler style
---rebind-stale-line`` (F-combo-line-format) on a tmp copy of the stand-in
-client tests/fixtures/universal, whose combo chart has a stale line
-projection ('#Report Measures'[!Cost], renamed to Cost in the model) and a
-column-side measure (Clicks on Y). The once-per-client guard and the
-PBI_AUTOFIX skip are dropped (the test works on a tmp copy).
+Runs ``pbi-plot-styler style --rebind-stale-line`` (F-combo-line-format) on a
+tmp copy of the sample client tests/fixtures/universal, whose combo chart has
+a stale line projection ('#Report Measures'[!Cost], renamed to Cost in the
+model) and a column-side measure (Clicks on Y), and expects exit 0 and a
+second run that changes nothing.
 
-The original selected the x-axis field-parameter tables with a brand-prefixed
-glob matching both families; the port lists them explicitly (DECISIONS:
-the styler default trio is not used here).
+The x-axis field-parameter tables are listed explicitly rather than matched
+by a name pattern; the styler's default trio is not used here.
 """
 from __future__ import annotations
 
@@ -21,9 +15,9 @@ import json
 
 import pytest
 
-from ported_helpers import report_context, run, universal  # noqa: F401
+from cli_helpers import report_context, run, universal  # noqa: F401
 
-PARITY = ["--rebind-stale-line", "--theme-color-id", "9", "--theme-color-percent", "0",
+REFERENCE_OPTIONS = ["--rebind-stale-line", "--theme-color-id", "9", "--theme-color-percent", "0",
           "--table", "x-Selector 1", "--table", "x-Plot Specific 1", "--table", "x-Plot Specific 2"]
 
 
@@ -42,7 +36,7 @@ class TestComboLineFormat:
     @pytest.mark.p1
     def test_impose_combo_chart_format(self, universal):
         client_dir = universal
-        result = run("style", client_dir, *PARITY)
+        result = run("style", client_dir, *REFERENCE_OPTIONS)
         assert result.exit_code == 0, result.output
 
         visual = json.loads(_combo(client_dir).read_text(encoding="utf-8"))["visual"]
@@ -57,6 +51,6 @@ class TestComboLineFormat:
             "expr": {"ThemeDataColor": {"ColorId": 2, "Percent": 0}}}}}}}
 
         before = _combo(client_dir).read_bytes()
-        again = run("style", client_dir, *PARITY)
+        again = run("style", client_dir, *REFERENCE_OPTIONS)
         assert again.exit_code == 0, again.output
         assert _combo(client_dir).read_bytes() == before  # a second run writes nothing

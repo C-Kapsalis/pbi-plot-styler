@@ -1,6 +1,6 @@
 """Canvas ("typical template") page scope for the f-Slicer / f-All gates.
 
-Ported from the author's layer-3.5 suite. The gates are imposed only on pages
+The gates are imposed only on pages
 that carry the standard canvas (at least one matrix AND at least one
 line-and-stacked-column chart) and never on a page whose name contains
 'cohort' or 'ltv'. Three consumers must agree: the canvas-page / selector-
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from pbi_plot_styler.canvas import canvas_pages, selector_slicers
-from ported_helpers import run
+from cli_helpers import run
 
 # page dir name -> (display name, visual types besides the selector slicer)
 PAGES = {
