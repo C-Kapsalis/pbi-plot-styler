@@ -59,7 +59,8 @@ def _master_candidate(visuals: dict[str, Visual], tables: tuple[str, ...]) -> Vi
         group = visuals[name]
         display = dig(group.data, "visualGroup", "displayName")
         return (
-            len(tables_under[name]) >= 2
+            group.is_group  # never turn a non-group visual into the master
+            and len(tables_under[name]) >= 2
             and group.data.get("isHidden") is not True
             and not (isinstance(display, str) and display.startswith("_"))
         )
@@ -69,9 +70,25 @@ def _master_candidate(visuals: dict[str, Visual], tables: tuple[str, ...]) -> Vi
         # name breaks ties, smallest first (hence the negated string order)
         return len(tables_under[name]), len(chain(visuals[name])), _reverse_order(name)
 
-    candidates = [name for name in tables_under if eligible(name)]
+    candidates = [name for name in tables_under if name in visuals and eligible(name)]
     best = max(candidates, key=rank, default=None)
     return visuals[best] if best is not None else None
+
+
+def _covered(visuals: dict[str, Visual], master: Visual, tables: tuple[str, ...]) -> list[str]:
+    """The filter tables of the visuals nested under ``master``."""
+    found: set[str] = set()
+    for visual in visuals.values():
+        if visual.is_group:
+            continue
+        parent, seen = visual.parent, set()
+        while parent and parent in visuals and parent not in seen:
+            if parent == master.name:
+                found |= _filter_tables_in(visual.path, tables)
+                break
+            seen.add(parent)
+            parent = visuals[parent].parent
+    return sorted(found)
 
 
 def _reverse_order(name: str) -> tuple[int, ...]:
@@ -80,8 +97,19 @@ def _reverse_order(name: str) -> tuple[int, ...]:
 
 
 def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
-    """Rename the detected master group on the main page, with its cascade."""
+    """Rename the detected master group on the main page, with its cascade.
+
+    Acts only when the check reports ``PNL001`` for the report: a report that
+    already has a visual named like the master (or no group at all) is left
+    as it is.
+    """
     target = ctx.settings.panel.group_name
+    every = list(ctx.index.visuals())
+    if not any(v.vtype in ("group", "unknown") for v in every):
+        return []
+    if any(v.semantic_name == target for v in every):
+        ctx.skip(f"filter-panel fix: {target!r} is already present; nothing to rename")
+        return []
     page = ctx.index.main_page(ctx.settings)
     if page is None:
         ctx.skip("filter-panel fix: no main page (slicers + combo chart + matrix)")
@@ -94,7 +122,9 @@ def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
     old = master.name
     display = dig(master.data, "visualGroup", "displayName")
     if old == target and display == target:
+        ctx.skip(f"filter-panel fix: {target!r} is already named; nothing to rename")
         return []
+    covered = _covered(visuals, master, ctx.settings.panel.filter_tables)
     if old != target and (page.path / "visuals" / target).exists():
         raise RuleError(
             f"cannot rename {old!r} to {target!r}: page {page.page_id} already "
@@ -104,13 +134,15 @@ def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
     changes: list[tuple[Path, str]] = []
     master.data["name"] = target
     master.data.setdefault("visualGroup", {})["displayName"] = target
-    rewrite_json(master.path, master.data)
-    changes.append((master.path, f"renamed group {old!r} to {target!r}"))
+    # this fixer writes visual files with non-ASCII text escaped
+    rewrite_json(master.path, master.data, ascii_only=True)
+    changes.append((master.path, f"renamed group {old!r} (display name {display!r}, "
+                                 f"covering {', '.join(covered)}) to {target!r}"))
     if old != target:
         for visual in page.visuals:
             if visual.parent == old and visual is not master:
                 visual.data["parentGroupName"] = target
-                if rewrite_json(visual.path, visual.data):
+                if rewrite_json(visual.path, visual.data, ascii_only=True):
                     changes.append((visual.path, f"parentGroupName {old!r} -> {target!r}"))
         bookmarks = ctx.report_dir / "definition" / "bookmarks"
         quoted_old, quoted_new = f'"{old}"', f'"{target}"'

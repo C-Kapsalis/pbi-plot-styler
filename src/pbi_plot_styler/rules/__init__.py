@@ -154,11 +154,12 @@ SUMMARY_RULES = ("slicer-gates", "category-filter", "theme", "filter-panel")
 
 
 # -- file writing shared by the fixers ------------------------------------------
-def rewrite_json(path: Path, data: Any) -> bool:
+def rewrite_json(path: Path, data: Any, *, ascii_only: bool = False) -> bool:
     """Write ``data`` back to ``path`` as 2-space JSON when it changed.
 
     The file keeps its own conventions: a UTF-8 BOM, CRLF line endings and
-    the presence or absence of a final newline. Returns whether it wrote.
+    the presence or absence of a final newline. Non-ASCII text is written as
+    is, or as ``\\u`` escapes with ``ascii_only``. Returns whether it wrote.
     """
     raw = path.read_bytes()
     bom = raw.startswith(b"\xef\xbb\xbf")
@@ -168,7 +169,7 @@ def rewrite_json(path: Path, data: Any) -> bool:
             return False
     except json.JSONDecodeError:
         pass
-    text = json.dumps(data, indent=2, ensure_ascii=False)
+    text = json.dumps(data, indent=2, ensure_ascii=ascii_only)
     if old_text.endswith("\n"):
         text += "\n"
     if "\r\n" in old_text:

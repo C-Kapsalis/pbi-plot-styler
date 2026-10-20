@@ -283,6 +283,14 @@
   last occurrence (it kept the first).
 - `style` accepts a page folder or a `visual.json`: it finds the enclosing
   report and restyles only the visuals under that path.
+- `check --rule filter-panel --fix` acts only when the check reports
+  `PNL001`; on a report that already has the master group (even in a
+  hash-named folder, with a nested sub-group covering the same tables) it
+  writes nothing and notes that the group is already present. A candidate
+  without a group object is never renamed. The change line names the old
+  display name and the filter tables covered. Visual files it rewrites
+  write non-ASCII text as `\u` escapes (the builder and the renames write it
+  as UTF-8).
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

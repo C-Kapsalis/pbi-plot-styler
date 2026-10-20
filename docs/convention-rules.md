@@ -158,11 +158,17 @@ Skipped when the report has no group containers.
 - `PNL001`: no visual is named `panel.group_name`.
 - `PNL002` (warning): it exists but is not a group.
 
-`--fix` works on the main page: the master is the visible group (display name
-not starting with `_`) that holds slicers of at least two filter tables, most
-tables first, then the deepest, then the smallest name. It is renamed, child
-`parentGroupName` links and bookmark references follow, and the folder is
-renamed last. An existing folder with the target name stops the fix (exit 2).
+`--fix` acts only when the check reports `PNL001`: a report that already has
+a visual named `panel.group_name` (whatever its folder is called) is left as
+it is, with a `skipped` note. It works on the main page: the master is the
+visible group object (display name not starting with `_`) that holds slicers
+of at least two filter tables, most tables first, then the deepest, then the
+smallest name; a visual that is not a group is never chosen. It is renamed,
+child `parentGroupName` links and bookmark references follow, and the folder
+is renamed last. The change line names the old name and display name and
+the filter tables the group covers. Visual files it rewrites keep non-ASCII
+text as `\u` escapes. An existing folder with the target name stops the fix
+(exit 2).
 
 ## format-selector
 
