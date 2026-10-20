@@ -20,24 +20,41 @@ A measure's colour is the slot its row's sort order lands on in the picker
 field parameter named by `SELECTEDVALUE`. The palette must declare exactly
 `modulus` slots.
 
-`sync` (a dry run unless `--apply`) stamps:
+`sync` (a dry run unless `--apply`) first prints the palette (picker,
+offset, modulus, slot count) and the number of registered measures, then
+stamps:
 
-- column series (bar, line and combo charts): `dataPoint` fill for the
-  measures on the `Y` role plus the measures a multi-series bookmark shows on
-  that visual (a capture with at least `--min-series` measures on `Y`). Line
-  (`Y2`) entries are never touched.
-- matrices bound to the picker: `columnFormatting` font colour plus
-  `styleValues`, `styleHeader` and `styleTotal`; registered measures that are
-  not needed get black.
-- bookmark overrides under `objects.merge`, only where they already exist.
+- column series (bar, column, line and combo charts, including plain
+  `barChart` and `columnChart`): `dataPoint` fill for the measures on the
+  `Y` role plus the measures a multi-series bookmark shows on that visual (a
+  capture with at least `--min-series` measures on `Y`). Line (`Y2`) entries
+  of the visual are never touched.
+- matrices bound to the picker (the picker is a field parameter of a value
+  role): `columnFormatting` font colour plus `styleValues`, `styleHeader` and
+  `styleTotal` for the registered measures the matrix projects as measure
+  fields (the field-parameter column itself adds none); registered measures
+  that are not needed get black. A matrix in scope only through
+  `--all-visuals` uses the bookmark-needed measures.
+- bookmark overrides under `objects.merge` (or directly under `objects`),
+  matched on page section and visual id, only where the array already
+  exists: existing entries are recoloured and every needed measure the array
+  lacks is added (sorted by key). A chart override's needed set keeps the
+  base visual's line measures.
 
-Colours are written as literal `'#rrggbb'` values. `--all-visuals` stamps
-every supported visual. Unsupported visuals bound to the picker, unregistered
-bookmark measures and colour collisions are reported as notes.
+A visual uses the picker only through a value role (columns, line or values);
+`--visual-type` is applied first, silently. Colours are written exactly as
+the palette spells them. `--all-visuals` stamps every supported visual. Each
+multi-series bookmark's series are listed with role, sort order and colour;
+unregistered series (line series included) and colour collisions are
+reported as notes, with a re-spacing hint. The run ends with the number of
+entries rewritten and added.
 
-`reset` reverts entries whose colour is a palette colour (or black): chart
-fills go back to theme colour `--default-color-id` (9); matrix entries lose
-the owned properties and disappear when empty.
+`reset` reverts entries of the picker's registered measures whose colour is a
+palette colour (or black, compared case-insensitively), on visuals and on
+bookmark overrides: chart fills go back to theme colour `--default-color-id`
+(9); matrix entries lose the font colour and any style flag that is `true`,
+and disappear when empty (an empty array is removed). `--visual-type`
+(repeatable) limits both visuals and bookmark captures.
 
 Exit codes: `0` changes written, or nothing to change; `1` a dry run found
 changes to make (rerun with `--apply`); `2` invalid input (palette or picker unreadable, an unresolvable bare `NAMEOF`,

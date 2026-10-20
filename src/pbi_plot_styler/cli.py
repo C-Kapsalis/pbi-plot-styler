@@ -967,10 +967,15 @@ def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
     except (PaletteError, FileNotFoundError, json.JSONDecodeError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(EXIT_INVALID)
+    for line in result.info:
+        click.echo(line)
     for note in result.notes:
         click.echo(f"note: {note}")
     for change in result.changes:
         click.echo(f"  {change}")
+    if action is color_sync:
+        click.echo(f"{result.rewritten} entr{'y' if result.rewritten == 1 else 'ies'} "
+                   f"rewritten, {result.added} added.")
     if apply:
         click.echo(f"APPLIED: {len(result.written)} file(s) written.")
     else:
@@ -1004,11 +1009,19 @@ def colors_sync(report_dir, model_dir, apply, measure, palette_table, default_co
 
 @colors.command("reset")
 @_color_options
+@click.option("--visual-type", "visual_types", multiple=True,
+              help="Visual type to revert (repeatable), on visuals and bookmark "
+              "captures. Default: bar, line, combo charts and matrices.")
 def colors_reset(report_dir, model_dir, apply, measure, palette_table,
-                 default_color_id) -> None:
-    """Revert palette colours written by sync (dry run unless --apply)."""
+                 default_color_id, visual_types) -> None:
+    """Revert palette colours written by sync (dry run unless --apply).
+
+    Only the picker's registered measures are reverted, on visuals and on
+    bookmark overrides.
+    """
     opts = ColorOptions(measure=measure, host_table=palette_table,
-                        default_color_id=default_color_id)
+                        default_color_id=default_color_id,
+                        visual_types=tuple(visual_types) or ColorOptions().visual_types)
     _run_colors(color_reset, report_dir, model_dir, apply, opts)
 
 

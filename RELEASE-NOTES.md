@@ -63,7 +63,8 @@
   existing one exactly as found); **`[targets] line_role` / `column_role`**.
 - **`colors sync` / `colors reset`**: one colour per measure from the model's
   palette measure, on column series, matrix columns and existing bookmark
-  overrides; exit `0` changes, `2` none, `3` invalid input.
+  overrides; exit `0` written or nothing to do, `1` a dry run found changes,
+  `2` invalid input.
 - **`bookmarks build`**: answer bookmarks rendered from a working base
   bookmark (picks, matrix and chart captures, visibility, category, date,
   drill level), `--keep-ids` re-render, `--legacy-layout`, `--dry-run`.
@@ -197,6 +198,37 @@
   column `filters.byExpr` expression) becomes that picker's first pick. A
   values slicer is never a picker (an entry cannot pick it) and never holds
   a measure; one the base bookmark does not capture is skipped.
+- `colors sync`: a matrix bound to the picker colours only the registered
+  measures it projects (the field-parameter column adds none; there is no
+  longer a whole-registry expansion); a matrix in scope only through
+  `--all-visuals` or a bookmark uses the bookmark-needed measures. Registered
+  entries outside that set turn black with the style flags.
+- `colors sync` completes bookmark overrides: an existing `dataPoint` or
+  `columnFormatting` array in a capture gains an entry for every needed
+  registered measure it lacks (sorted by key; an array is never created), a
+  matrix override blackens registered measures it does not need, a chart
+  override keeps the base visual's line measures in its needed set, and
+  overrides stored directly under `objects` (no `merge` wrapper) are found.
+  Overrides are matched on page section and visual id, and the array follows
+  the capture's own visual type.
+- `colors sync` writes each colour exactly as the palette measure spells it
+  (`#ABCDEF` stays upper case), so a report synced with upper-case colours
+  is a no-op; reset still compares case-insensitively.
+- `colors`: a visual uses the picker only when a value role (columns, line or
+  values) carries it as a field parameter; a slicer on the picker or a matrix
+  with the picker on rows is out of scope. `--visual-type` is applied first
+  and silently; the "not supported" note appears only for a visual that
+  would otherwise be in scope.
+- `colors reset` reverts bookmark overrides too (wrapped or not), takes the
+  repeatable `--visual-type`, loads the picker registry (same errors as
+  `sync`) and reverts only registered measures; a matrix style flag is
+  removed only when it is `true`.
+- `colors` handles the plain `barChart` and `columnChart` types.
+- `colors sync` prints a palette summary (picker, offset, modulus, slot
+  count, registered measures), lists every series of each multi-series
+  bookmark with its role, order and colour (line series included in the
+  collision and unregistered checks), adds a re-spacing hint on collisions
+  and ends with the number of entries rewritten and added.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

@@ -12,8 +12,9 @@ picker field parameter. ``sync`` stamps that colour wherever the measure
 renders as a column series or a matrix column, including measures that only
 a multi-series bookmark shows; ``reset`` reverts what ``sync`` wrote.
 
-Exit codes: 0 when there are changes, 2 when there are none, 3 when the
-palette or the picker cannot be read (nothing is written).
+Exit codes (set by the CLI): 0 written or nothing to do, 1 a dry run found
+changes, 2 when the palette or the picker cannot be read (nothing is
+written).
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ from .rules import rewrite_json
 from .tmdl import SemanticModel, strip_dax_comments
 
 BAR_TYPES = (
-    "clusteredColumnChart", "stackedColumnChart", "hundredPercentStackedColumnChart",
+    "barChart", "columnChart", "clusteredColumnChart", "stackedColumnChart", "hundredPercentStackedColumnChart",
     "clusteredBarChart", "stackedBarChart", "hundredPercentStackedBarChart",
     "lineChart", "areaChart", "stackedAreaChart",
     "lineClusteredColumnComboChart", "lineStackedColumnComboChart",
@@ -103,7 +104,8 @@ def parse_palette(model: SemanticModel, measure: str, host: str) -> Palette:
     sign, amount = term.groups()
     offset = int(amount or 0) * (-1 if sign == "-" else 1)
     modulus, base = int(mod.group(2)), int(mod.group(3))
-    slots = {int(n): colour.lower() for n, colour in _SLOT.findall(body)}
+    # colours keep the palette's spelling; only reset compares case-insensitively
+    slots = {int(n): colour for n, colour in _SLOT.findall(body)}
     if modulus <= 0 or len(slots) != modulus:
         raise PaletteError(
             f"[{measure}]: MOD cycles through {modulus} slot(s) but the SWITCH "
@@ -141,6 +143,11 @@ def picker_registry(model: SemanticModel, picker: str) -> dict[str, int]:
 
 
 # -- report side ------------------------------------------------------------------------
+#: query roles whose field parameter makes a visual "use" the picker:
+#: the columns, the line and the matrix values.
+VALUE_ROLES = ("Y", "Y2", "Values")
+
+
 def _measure_keys(items: Any) -> list[str]:
     keys = []
     for item in items or []:
@@ -160,6 +167,10 @@ def _true() -> dict:
     return qx.prop_literal("true")
 
 
+def _is_true(prop: Any) -> bool:
+    return dig(prop, "expr", "Literal", "Value") == "true"
+
+
 def _owned_colour(prop: Any) -> str | None:
     value = dig(prop, "solid", "color", "expr", "Literal", "Value")
     return value.strip("'").lower() if isinstance(value, str) else None
@@ -170,19 +181,36 @@ def _metadata(entry: Any) -> str | None:
     return key if isinstance(key, str) else None
 
 
+def _card(vtype: str | None) -> str | None:
+    """The array a visual type's colours live in."""
+    if vtype in BAR_TYPES:
+        return "dataPoint"
+    if vtype in TABLE_TYPES:
+        return "columnFormatting"
+    return None
+
+
 @dataclass
 class _Target:
     path: Path
     data: dict
     vtype: str
+    page: str
+    vid: str
+    #: measures whose colour the visual itself carries.
     needed: set[str] = field(default_factory=set)
+    #: measures a bookmark override of this visual carries.
+    override_needed: set[str] = field(default_factory=set)
 
 
 @dataclass
 class ColorReport:
     changes: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    info: list[str] = field(default_factory=list)
     written: list[Path] = field(default_factory=list)
+    rewritten: int = 0
+    added: int = 0
 
 
 @dataclass
@@ -202,52 +230,74 @@ def _visuals(report: Path) -> Iterable[tuple[Path, dict]]:
             yield path, data
 
 
-def _bound_entities(visual: dict) -> Iterator[str]:
-    """Every table a visual's query roles bind, through a column or a parameter."""
+def _identity(path: Path, data: dict) -> tuple[str, str]:
+    """``(page section, visual id)`` of a visual file."""
+    vid = data.get("name") if isinstance(data.get("name"), str) else path.parent.name
+    return path.parent.parent.parent.name, vid
+
+
+def _uses_picker(visual: dict, picker: str) -> bool:
+    """A value role (columns, line or values) carries the picker as a field parameter."""
     roles = dig(visual, "visual", "query", "queryState")
     if not isinstance(roles, dict):
-        return
-    for role in roles.values():
-        for param in dig(role, "fieldParameters") or []:
-            yield dig(param, "parameterExpr", "Column", "Expression", "SourceRef", "Entity")
-        for projection in dig(role, "projections") or []:
-            yield dig(projection, "field", "Column", "Expression", "SourceRef", "Entity")
+        return False
+    for role in VALUE_ROLES:
+        for param in dig(roles, role, "fieldParameters") or []:
+            if dig(param, "parameterExpr", "Column", "Expression", "SourceRef", "Entity") == picker:
+                return True
+    return False
 
 
-def _binds_table(visual: dict, table: str) -> bool:
-    return table in _bound_entities(visual)
+def _multi_series(bookmarks: list[Bookmark], opts: ColorOptions):
+    """``(bookmark, section id, container id, single)`` of each multi-series capture."""
+    for bookmark in bookmarks:
+        for section_id, section in bookmark.sections.items():
+            for cid, container in bookmark.containers(section).items():
+                single = dig(container, "singleVisual")
+                if dig(single, "visualType") not in BAR_TYPES:
+                    continue
+                if len(_measure_keys(dig(single, "projections", "Y"))) < opts.min_series:
+                    continue
+                yield bookmark, section_id, cid, single
 
 
 def _bookmark_needs(
     bookmarks: list[Bookmark], registry: dict[str, int], palette: Palette,
     opts: ColorOptions, report: ColorReport,
-) -> dict[str, set[str]]:
-    """visual id -> keys a multi-series bookmark shows on it."""
-    needs: dict[str, set[str]] = {}
-    for bookmark in bookmarks:
-        for section in bookmark.sections.values():
-            for cid, container in bookmark.containers(section).items():
-                single = dig(container, "singleVisual")
-                if dig(single, "visualType") not in BAR_TYPES:
+) -> dict[tuple[str, str], set[str]]:
+    """(page section, visual id) -> keys a multi-series bookmark shows on it.
+
+    Every series of such a capture (columns, line and values) is listed with
+    its role, sort order and colour; unregistered series and series sharing
+    a colour are reported.
+    """
+    needs: dict[tuple[str, str], set[str]] = {}
+    collided = False
+    for bookmark, section_id, cid, single in _multi_series(bookmarks, opts):
+        report.info.append(f"bookmark {bookmark.display_name!r} on {cid}:")
+        colours: dict[str, str] = {}
+        for role in VALUE_ROLES:
+            for key in _measure_keys(dig(single, "projections", role)):
+                if key not in registry:
+                    report.info.append(f"  {role:<6} {key}: not registered, no palette colour")
+                    report.notes.append(
+                        f"bookmark {bookmark.display_name!r}: {key} is not a row of "
+                        f"{palette.picker!r}, so it has no palette colour")
                     continue
-                series = _measure_keys(dig(single, "projections", "Y"))
-                if len(series) < opts.min_series:
-                    continue
-                known = [k for k in series if k in registry]
-                for key in series:
-                    if key not in registry:
-                        report.notes.append(
-                            f"bookmark {bookmark.display_name!r}: {key} is not a row of "
-                            f"{palette.picker!r}, so it has no palette colour")
-                colours: dict[str, str] = {}
-                for key in known:
-                    colour = palette.colour(registry[key])
-                    if colour in colours:
-                        report.notes.append(
-                            f"bookmark {bookmark.display_name!r}: {colours[colour]} and "
-                            f"{key} share colour {colour} on {cid}")
-                    colours.setdefault(colour, key)
-                needs.setdefault(cid, set()).update(known)
+                colour = palette.colour(registry[key])
+                report.info.append(f"  {role:<6} {key}: order {registry[key]}, colour {colour}")
+                if colour.lower() in colours and colours[colour.lower()] != key:
+                    collided = True
+                    report.notes.append(
+                        f"bookmark {bookmark.display_name!r}: {colours[colour.lower()]} and "
+                        f"{key} share colour {colour} on {cid}")
+                colours.setdefault(colour.lower(), key)
+        known = [k for k in _measure_keys(dig(single, "projections", "Y")) if k in registry]
+        needs.setdefault((section_id, cid), set()).update(known)
+    if collided:
+        report.notes.append(
+            f"hint: re-space the sort order of {palette.picker!r} (or add palette slots) so "
+            f"measures shown together land on different slots")
     return needs
 
 
@@ -257,49 +307,53 @@ def _targets(report_dir: Path, registry: dict[str, int], palette: Palette,
     targets = []
     for path, data in _visuals(report_dir):
         vtype = dig(data, "visual", "visualType")
-        vid = data.get("name") if isinstance(data.get("name"), str) else path.parent.name
-        uses = _binds_table(data, palette.picker)
-        supported = vtype in opts.visual_types and (vtype in BAR_TYPES or vtype in TABLE_TYPES)
-        if uses and not supported:
-            report.notes.append(f"{vid}: {vtype} uses {palette.picker!r} but is not supported")
+        if vtype not in opts.visual_types:
+            continue  # the visual-type filter comes first, silently
+        page, vid = _identity(path, data)
+        uses = _uses_picker(data, palette.picker)
+        bookmarked = (page, vid) in needs
+        in_scope = opts.all_visuals or bookmarked or (vtype in TABLE_TYPES and uses)
+        if _card(vtype) is None:
+            if in_scope or uses:
+                report.notes.append(f"{vid}: {vtype} uses {palette.picker!r} but is not supported")
             continue
-        if not supported:
-            continue
-        in_scope = (
-            opts.all_visuals
-            or vid in needs
-            or (vtype in TABLE_TYPES and uses)
-        )
         if not in_scope:
             continue
-        target = _Target(path, data, vtype)
+        target = _Target(path, data, vtype, page, vid)
         state = dig(data, "visual", "query", "queryState") or {}
+        extra = needs.get((page, vid), set())
         if vtype in BAR_TYPES:
             line = set(_measure_keys(dig(state, "Y2", "projections")))
-            base = _measure_keys(dig(state, "Y", "projections"))
-            target.needed = {k for k in base if k in registry} | needs.get(vid, set())
-            target.needed -= line
+            base = {k for k in _measure_keys(dig(state, "Y", "projections")) if k in registry}
+            target.override_needed = base | extra
+            target.needed = target.override_needed - line
         else:
-            projected = set(_measure_keys(dig(state, "Values", "projections")))
-            if any(dig(p, "field", "Column", "Expression", "SourceRef", "Entity") == palette.picker
-                   for p in dig(state, "Values", "projections") or []):
-                projected |= set(registry)
-            target.needed = ({k for k in projected if k in registry} or needs.get(vid, set()))
+            if uses:
+                projected = _measure_keys(dig(state, "Values", "projections"))
+                target.needed = {k for k in projected if k in registry}
+            else:
+                target.needed = set(extra)
+            target.override_needed = set(target.needed)
         targets.append(target)
     return targets
 
 
-def _sync_bar(entries: list, needed: set[str], colour_of) -> list:
+def _sync_bar(entries: list, needed: set[str], colour_of, counts: list[int]) -> list:
     out = copy.deepcopy(entries)
     seen = set()
     for entry in out:
         key = _metadata(entry)
         if key in needed:
-            entry.setdefault("properties", {})["fill"] = _literal_colour(colour_of(key))
+            props = entry.setdefault("properties", {})
+            fill = _literal_colour(colour_of(key))
+            if props.get("fill") != fill:
+                props["fill"] = fill
+                counts[0] += 1
             seen.add(key)
     for key in sorted(needed - seen):
         out.append({"properties": {"fill": _literal_colour(colour_of(key))},
                     "selector": {"metadata": key}})
+        counts[1] += 1
     return out
 
 
@@ -311,18 +365,35 @@ def _table_props(colour: str, existing: dict | None = None) -> dict:
     return props
 
 
-def _sync_table(entries: list, needed: set[str], registry: dict[str, int], colour_of) -> list:
+def _sync_table(entries: list, needed: set[str], registry: dict[str, int], colour_of,
+                counts: list[int]) -> list:
     out = copy.deepcopy(entries)
     seen = set()
     for entry in out:
         key = _metadata(entry)
         if key in registry:
             colour = colour_of(key) if key in needed else BLACK
-            entry["properties"] = _table_props(colour, entry.get("properties"))
+            props = _table_props(colour, entry.get("properties"))
+            if props != entry.get("properties"):
+                entry["properties"] = props
+                counts[0] += 1
             seen.add(key)
     for key in sorted(needed - seen):
         out.append({"properties": _table_props(colour_of(key)), "selector": {"metadata": key}})
+        counts[1] += 1
     return out
+
+
+def _override_holder(single: Any) -> dict | None:
+    """The node a bookmark capture keeps its formatting overrides in.
+
+    Normally ``objects.merge``; without that wrapper, ``objects`` itself.
+    """
+    objects = dig(single, "objects")
+    if not isinstance(objects, dict):
+        return None
+    merge = objects.get("merge")
+    return merge if isinstance(merge, dict) else objects
 
 
 def sync(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) -> ColorReport:
@@ -330,96 +401,140 @@ def sync(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) -> 
     palette = parse_palette(model, opts.measure, opts.host_table)
     registry = picker_registry(model, palette.picker)
     report = ColorReport()
+    report.info.append(
+        f"palette: picker {palette.picker!r}, offset {palette.offset}, modulus "
+        f"{palette.modulus}, {len(palette.slots)} slot(s); {len(registry)} registered "
+        f"measure(s)")
 
     def colour_of(key: str) -> str:
         return palette.colour(registry[key])
 
     dirty: dict[Path, dict] = {}
+    counts = [0, 0]
     targets = _targets(report_dir, registry, palette, opts, report)
     for target in targets:
         objects = target.data.setdefault("visual", {}).setdefault("objects", {})
-        card = "dataPoint" if target.vtype in BAR_TYPES else "columnFormatting"
+        card = _card(target.vtype)
         before = objects.get(card) or []
-        if target.vtype in BAR_TYPES:
-            after = _sync_bar(before, target.needed, colour_of)
+        if card == "dataPoint":
+            after = _sync_bar(before, target.needed, colour_of, counts)
         else:
-            after = _sync_table(before, target.needed, registry, colour_of)
+            after = _sync_table(before, target.needed, registry, colour_of, counts)
         if after != before:
             objects[card] = after
             dirty[target.path] = target.data
             report.changes.append(
-                f"{target.path.parent.name}: {card} for {', '.join(sorted(target.needed))}")
-    by_id = {t.data.get("name"): t for t in targets}
+                f"{target.vid}: {card} for {', '.join(sorted(target.needed)) or '(none needed)'}")
+    by_id = {(t.page, t.vid): t for t in targets}
     for bookmark in load_bookmarks(report_dir):
         touched = False
-        for section in bookmark.sections.values():
+        for section_id, section in bookmark.sections.items():
             for cid, container in bookmark.containers(section).items():
-                target = by_id.get(cid)
-                merge = dig(container, "singleVisual", "objects", "merge")
-                if target is None or not isinstance(merge, dict):
+                target = by_id.get((section_id, cid))
+                single = dig(container, "singleVisual")
+                holder = _override_holder(single)
+                if target is None or holder is None:
                     continue
-                card = "dataPoint" if target.vtype in BAR_TYPES else "columnFormatting"
-                if not isinstance(merge.get(card), list):
-                    continue
-                for entry in merge[card]:
-                    key = _metadata(entry)
-                    if key not in target.needed:
-                        continue
-                    props = entry.setdefault("properties", {})
-                    new = (_literal_colour(colour_of(key)) if card == "dataPoint" else None)
-                    if card == "dataPoint" and props.get("fill") != new:
-                        props["fill"] = new
-                        touched = True
-                    elif card == "columnFormatting":
-                        updated = _table_props(colour_of(key), props)
-                        if updated != props:
-                            entry["properties"] = updated
-                            touched = True
+                card = _card(dig(single, "visualType")) or _card(target.vtype)
+                entries = holder.get(card)
+                if not isinstance(entries, list):
+                    continue  # an override array is never created
+                if card == "dataPoint":
+                    after = _sync_bar(entries, target.override_needed, colour_of, counts)
+                else:
+                    after = _sync_table(entries, target.override_needed, registry, colour_of,
+                                        counts)
+                if after != entries:
+                    holder[card] = after
+                    touched = True
         if touched:
             dirty[bookmark.path] = bookmark.data
             report.changes.append(f"bookmark {bookmark.display_name!r}: overrides")
+    report.rewritten, report.added = counts
     _write(dirty, apply, report)
     return report
+
+
+def _revert_entries(entries: list, card: str, registry: dict[str, int], owned: set[str],
+                    opts: ColorOptions) -> tuple[list | None, bool]:
+    """Revert the palette colours of registered measures in one array.
+
+    Returns the new array (``None`` when it ends up empty) and whether
+    anything changed.
+    """
+    changed = False
+    kept = []
+    for entry in copy.deepcopy(entries):
+        key = _metadata(entry)
+        props = dig(entry, "properties")
+        if key not in registry or not isinstance(props, dict):
+            kept.append(entry)
+            continue
+        if card == "dataPoint":
+            if _owned_colour(props.get("fill")) in owned:
+                props["fill"] = _theme_colour(opts.default_color_id)
+                changed = True
+            kept.append(entry)
+            continue
+        if _owned_colour(props.get("fontColor")) not in owned:
+            kept.append(entry)
+            continue
+        props = {k: v for k, v in props.items()
+                 if k != "fontColor" and not (k in _TABLE_OWNED and _is_true(v))}
+        changed = True
+        if props:
+            entry["properties"] = props
+            kept.append(entry)
+    return (kept or None), changed
 
 
 def reset(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) -> ColorReport:
     model = SemanticModel.load(model_dir)
     palette = parse_palette(model, opts.measure, opts.host_table)
+    registry = picker_registry(model, palette.picker)
     owned = palette.colours | {BLACK}
     report = ColorReport()
     dirty: dict[Path, dict] = {}
+    types: dict[tuple[str, str], str] = {}
     for path, data in _visuals(report_dir):
         vtype = dig(data, "visual", "visualType")
-        objects = dig(data, "visual", "objects")
-        if not isinstance(objects, dict):
+        types[_identity(path, data)] = vtype
+        if vtype not in opts.visual_types:
             continue
-        changed = False
-        if vtype in BAR_TYPES and isinstance(objects.get("dataPoint"), list):
-            for entry in objects["dataPoint"]:
-                fill = dig(entry, "properties", "fill")
-                if _metadata(entry) and _owned_colour(fill) in owned:
-                    entry["properties"]["fill"] = _theme_colour(opts.default_color_id)
-                    changed = True
-        if vtype in TABLE_TYPES and isinstance(objects.get("columnFormatting"), list):
-            kept = []
-            for entry in objects["columnFormatting"]:
-                props = dig(entry, "properties")
-                if _metadata(entry) and isinstance(props, dict) \
-                        and _owned_colour(props.get("fontColor")) in owned:
-                    props = {k: v for k, v in props.items() if k not in _TABLE_OWNED}
-                    changed = True
-                    if not props:
-                        continue
-                    entry = {**entry, "properties": props}
-                kept.append(entry)
-            if changed:
-                if kept:
-                    objects["columnFormatting"] = kept
-                else:
-                    objects.pop("columnFormatting")
+        objects = dig(data, "visual", "objects")
+        card = _card(vtype)
+        if card is None or not isinstance(objects, dict) or not isinstance(objects.get(card), list):
+            continue
+        after, changed = _revert_entries(objects[card], card, registry, owned, opts)
         if changed:
+            if after is None:
+                objects.pop(card)
+            else:
+                objects[card] = after
             dirty[path] = data
-            report.changes.append(f"{path.parent.name}: palette colours reverted")
+            report.changes.append(f"{_identity(path, data)[1]}: palette colours reverted")
+    for bookmark in load_bookmarks(report_dir):
+        touched = False
+        for section_id, section in bookmark.sections.items():
+            for cid, container in bookmark.containers(section).items():
+                single = dig(container, "singleVisual")
+                vtype = dig(single, "visualType") or types.get((section_id, cid))
+                if vtype not in opts.visual_types:
+                    continue
+                card = _card(vtype)
+                holder = _override_holder(single)
+                if card is None or holder is None or not isinstance(holder.get(card), list):
+                    continue
+                after, changed = _revert_entries(holder[card], card, registry, owned, opts)
+                if changed:
+                    if after is None:
+                        holder.pop(card)
+                    else:
+                        holder[card] = after
+                    touched = True
+        if touched:
+            dirty[bookmark.path] = bookmark.data
+            report.changes.append(f"bookmark {bookmark.display_name!r}: overrides reverted")
     _write(dirty, apply, report)
     return report
 
