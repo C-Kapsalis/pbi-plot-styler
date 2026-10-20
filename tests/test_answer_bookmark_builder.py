@@ -96,7 +96,7 @@ def _files_snapshot(builder: Path) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in sorted(_bookmarks_dir(builder).iterdir())}
 
 
-# -- the ported generic config -------------------------------------------------
+# -- the example config -------------------------------------------------------
 def test_letters_config_builds_one_bookmark_per_entry(builder):
     entries = load(LETTERS_CONFIG)
     result = _build(builder, LETTERS_CONFIG, "--base", BASE_ID, "--group", GROUP)
@@ -195,7 +195,7 @@ def test_output_is_two_space_json_with_trailing_newline(builder):
         assert text == json.dumps(json.loads(text), indent=2) + "\n" or f.stem == BASE_ID
 
 
-# -- self-test assertions of the original scripts ------------------------------
+# -- self-test assertions ------------------------------------------------------
 def test_self_test_one_values_pick(builder, tmp_path):
     pick = {"table": "Newsletter Measures", "column": "Letters Sent #", "label": "Letters Sent #"}
     cfg = _write_config(tmp_path, [{"displayName": "Letters | Self test", "pickers": {"x_selector_2": [pick]}}])
@@ -406,3 +406,17 @@ def test_keep_ids_rerenders_in_place(builder, tmp_path):
                     if i["name"] == GROUP)["children"]
     assert children[0] == built["Letters | Brand new"]["name"]
     assert children.count(first) == 1
+
+
+def test_a_bookmark_built_without_a_group_is_registered_at_the_top_level(builder):
+    result = _build(builder, LETTERS_CONFIG, "--base", BASE_ID)
+    assert result.exit_code == 0, result.output
+    built = _by_display(builder)
+    built.pop("Base | Template")
+    top = [i["name"] for i in load(_bookmarks_dir(builder) / "bookmarks.json")["items"]]
+    assert built and all(bm["name"] in top for bm in built.values())
+    assert "registered" in result.output
+    again = _build(builder, LETTERS_CONFIG, "--base", BASE_ID, "--keep-ids")
+    assert again.exit_code == 0, again.output
+    top_again = [i["name"] for i in load(_bookmarks_dir(builder) / "bookmarks.json")["items"]]
+    assert sorted(top_again) == sorted(top)

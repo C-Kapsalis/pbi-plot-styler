@@ -39,7 +39,7 @@ from .report import (
     resolve_model_dir,
     write_zip,
 )
-from .bookmark_builder import BuildError, build_bookmarks, load_builder_settings
+from .bookmark_builder import TOP_LEVEL, BuildError, build_bookmarks, load_builder_settings
 from .colors import ColorOptions, PaletteError
 from .colors import reset as color_reset
 from .colors import sync as color_sync
@@ -1112,7 +1112,8 @@ def bookmarks_build(entries: Path, report_dir: Path, config_path: Path | None,
     for path in result.written:
         click.echo(f"  {verb} {path.relative_to(report_dir).as_posix()}")
     for group_name, names in result.registered.items():
-        click.echo(f"  registered {len(names)} bookmark(s) in group {group_name}")
+        where = "at the top level" if group_name == TOP_LEVEL else f"in group {group_name}"
+        click.echo(f"  registered {len(names)} bookmark(s) {where}")
     click.echo(f"{len(result.written)} bookmark(s) {'built (dry run)' if dry_run else 'built'}.")
 
 

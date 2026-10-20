@@ -137,6 +137,9 @@
   (`MOD ( _order - 1, n )`); it was read as offset 0, shifting every colour.
   A first `MOD` argument other than `<order>`, `<order> + n` or
   `<order> - n` is now rejected with exit `2`.
+- `bookmarks build` without `--group` registers each new bookmark as a
+  top-level entry of `bookmarks.json` (created if missing), so Power BI lists
+  it; previously such bookmarks were written but not registered.
 
 ### Notes on choices made where the specs left room
 

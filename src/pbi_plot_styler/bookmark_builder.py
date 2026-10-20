@@ -440,6 +440,10 @@ class BuildResult:
     registered: dict[str, list[str]]
 
 
+#: the ``registered`` key for bookmarks listed outside any group.
+TOP_LEVEL = "(top level)"
+
+
 def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings, *,
                     base: str | None = None, group: str | None = None,
                     keep_ids: bool = False, legacy: bool = False,
@@ -456,10 +460,17 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
     index = copy.deepcopy(builder.index) if isinstance(builder.index, dict) else None
     registered: dict[str, list[str]] = {}
     front: dict[str, list[str]] = {}
+    if index is None:
+        index = {"items": []}
+    top_level = index.setdefault("items", [])
     for item in built:
         if item.group is None:
+            # no group: the bookmark is its own top-level entry
+            if not any(i.get("name") == item.name for i in top_level):
+                top_level.append({"name": item.name})
+                registered.setdefault(TOP_LEVEL, []).append(item.name)
             continue
-        group_item = next(i for i in index["items"] if i.get("name") == item.group)
+        group_item = next(i for i in top_level if i.get("name") == item.group)
         children = group_item.setdefault("children", [])
         if item.name in children:
             continue
@@ -479,7 +490,11 @@ def build_bookmarks(report: Path, entries_path: Path, settings: BuilderSettings,
         path = builder.dir / f"{item.name}.bookmark.json"
         path.write_bytes(Layout.of_file(path).encode(json.dumps(item.data, indent=2)))
         written.append(path)
-    if index is not None and registered:
+    if registered:
         from .rules import rewrite_json
-        rewrite_json(builder.dir / "bookmarks.json", index)
+        index_path = builder.dir / "bookmarks.json"
+        if index_path.is_file():
+            rewrite_json(index_path, index)
+        else:
+            index_path.write_bytes(Layout().encode(json.dumps(index, indent=2)))
     return BuildResult(written, registered)
