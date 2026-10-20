@@ -110,6 +110,9 @@ class AnswerBookmarksSection:
     inherited_fingerprints: tuple[str, ...] = ()
     submenu_prefix: str = "Submenu"
     slot_mode: str = "values-only"
+    #: accepted-findings file used when the run names no --baseline
+    #: (relative to the config file).
+    baseline: str | None = None
 
 
 @dataclass(frozen=True)
@@ -153,7 +156,7 @@ _SECTIONS = {
 }
 
 #: Keys accepted for compatibility but not used by any rule.
-_IGNORED_KEYS = {"caption": None, "answer_bookmarks": {"baseline"}}
+_IGNORED_KEYS: dict[str, set[str] | None] = {"caption": None}
 
 #: Sections of plotstyler.toml that belong to other commands.
 FOREIGN_SECTIONS = {"tables", "targets", "style", "bookmarks", "caption"}

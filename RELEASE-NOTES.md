@@ -229,6 +229,43 @@
   bookmark with its role, order and colour (line series included in the
   collision and unregistered checks), adds a re-spacing hint on collisions
   and ends with the number of entries rewritten and added.
+- `answer-bookmarks`: `ABK000` (nothing matched the prefixes) can no longer
+  be accepted by a baseline: `--update-baseline` never writes it, drops an
+  existing entry for it and exits `1` while it occurs.
+- `answer-bookmarks`: `ABK006` covers every main-page selector slicer, the
+  row dropdowns and any configured slicer that a bookmark captures, not only
+  the matrix parameters' slicers.
+- `answer-bookmarks`: a row parameter whose slicer cannot be determined is a
+  setup error (exit `2`) naming the candidates and `[answer_bookmarks]
+  slicers`, instead of silently skipping the row checks; a matrix without a
+  row parameter notes the two checks not run; a declared parameter with no
+  known slicer is reported by name in both slot modes, and an empty slot map
+  counts as missing in `all-roles` mode.
+- `answer-bookmarks` and `bookmark-literals` report a bookmark file (and,
+  for answer bookmarks, a main-page visual) that does not parse as `JSN001`,
+  so the run fails; the navigator check compares against the bookmark files
+  on disk.
+- `--only-display-names` also accepts the `bookmarks build` entries file.
+- `answer-bookmarks` and `bookmark-literals` print what they checked (answer
+  bookmarks; bookmarks scanned, literals checked, literals resolved), also
+  as `checked` in `--json`.
+- `[answer_bookmarks] baseline` is honoured (it was accepted and ignored):
+  without `--baseline`, a run that includes `answer-bookmarks` uses that
+  file, relative to the config file; a missing file is a usage error.
+- `healed` lists only accepted entries of the run's rules and reports, and
+  is followed by a hint that `--update-baseline` locks the improvement in.
+- `bookmark-literals` with no usable model on any report of the run exits
+  `2` naming `--model` instead of passing.
+- `ABK009` names the picks outside their slots; `ABK010` says when the
+  dropdowns hold nothing; `--summary` prints a remediation hint under each
+  finding (`fix` in `--json`); docs/convention-rules.md explains each
+  `ABK` / `PGW` id.
+- `PGW002` reads the navigator's selected bookmark only as a single-quoted,
+  lower-case 20-character hex id, as Power BI writes it (it also accepted
+  upper case and double quotes).
+- BUGFIX (kept): the picker-literal registry normalises the table
+  qualifier (`'Stores'[Region]` and `Stores[Region]` register the same row),
+  and inherited fingerprints match non-ASCII text.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

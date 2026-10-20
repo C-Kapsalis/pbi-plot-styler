@@ -55,8 +55,13 @@ class _Scope:
     matrix_id: str
     matrix: Visual | None
     slicer_for: dict[str, str | None] = dc_field(default_factory=dict)
+    #: parameter table -> the main-page slicers that could be its slicer,
+    #: kept when discovery found none or several.
+    candidates: dict[str, list[str]] = dc_field(default_factory=dict)
     row_param: str | None = None
     row_dropdowns: list[str] = dc_field(default_factory=list)
+    #: main-page slicers whose query references exactly one selector table.
+    selector_slicers: list[str] = dc_field(default_factory=list)
 
     def declared(self, role: str) -> list[str]:
         if self.matrix is None:
@@ -74,7 +79,15 @@ class _Scope:
         return self.slicer_for.get(self.row_param) if self.row_param else None
 
     def picker_ids(self) -> list[str]:
-        return sorted({sid for sid in self.slicer_for.values() if sid})
+        """Every picker whose capture must select something.
+
+        The main-page selector slicers, the row dropdowns and every slicer
+        known for a parameter (configured or discovered).
+        """
+        ids = {sid for sid in self.slicer_for.values() if sid}
+        ids.update(self.selector_slicers)
+        ids.update(self.row_dropdowns)
+        return sorted(ids)
 
 
 def _resolve_scope(ctx: RuleContext) -> _Scope:
@@ -118,6 +131,13 @@ def _resolve_scope(ctx: RuleContext) -> _Scope:
             and {e for e in v.query_entities() if ctx.settings.is_selector_table(e)} == {table}
         ]
         scope.slicer_for[table] = matches[0] if len(matches) == 1 else None
+        if len(matches) != 1:
+            scope.candidates[table] = matches
+    scope.selector_slicers = [
+        v.folder for v in main.visuals
+        if v.vtype == "slicer"
+        and len({e for e in v.query_entities() if ctx.settings.is_selector_table(e)}) == 1
+    ]
     rows = scope.declared("Rows")
     scope.row_param = rows[0] if rows else None
     if cfg.row_dropdowns is not None:
@@ -159,9 +179,24 @@ def check_answer_bookmarks(ctx: RuleContext) -> None:
             "config file (the display-name prefixes of the answer bookmarks)"
         )
     scope = _resolve_scope(ctx)
+    if scope.row_param and scope.row_slicer is None:
+        found = scope.candidates.get(scope.row_param, [])
+        which = (f"several slicers could be it ({', '.join(found)})" if found
+                 else "no main-page slicer references only that table")
+        raise RuleError(
+            f"{ctx.label}: cannot tell which slicer picks the matrix rows "
+            f"({scope.row_param!r}): {which}; set it in [answer_bookmarks] slicers "
+            f"(\"{scope.row_param}\" = \"<slicer visual id>\")"
+        )
+    if not scope.row_param:
+        ctx.skip("answer-bookmarks: the matrix declares no row parameter, so ABK004 "
+                 "(rows are the bookmark's own) and ABK010 (rows in the dropdowns) "
+                 "were not run")
+    report_unreadable(ctx, [scope.main.path / "visuals"])
     _check_page_wells(ctx, scope)
     answers = _answer_bookmarks(ctx)
     ctx.checked["answer-bookmarks"] = len(answers)
+    ctx.details["answer-bookmarks"] = {"answer bookmarks": len(answers)}
     if not answers:
         ctx.add("ABK000", ctx.report_dir / "definition" / "bookmarks", "prefixes",
                 f"no bookmark display name starts with any of "
@@ -171,6 +206,22 @@ def check_answer_bookmarks(ctx: RuleContext) -> None:
     submenu_children = _submenu_children(ctx)
     for bookmark in answers:
         _check_bookmark(ctx, scope, bookmark, submenu_children)
+
+
+def report_unreadable(ctx: RuleContext, visual_dirs: list[Path] = ()) -> None:
+    """``JSN001`` for every bookmark file, and visual under ``visual_dirs``, that does not parse.
+
+    The rules read only what parses; an unreadable file must still fail the
+    run instead of being passed over.
+    """
+    files = sorted((ctx.report_dir / "definition" / "bookmarks").glob("*.json"))
+    for folder in visual_dirs:
+        files += sorted(Path(folder).glob("*/visual.json"))
+    for path in files:
+        try:
+            load_json(path)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            ctx.add("JSN001", path, path.name, f"not valid JSON: {exc}")
 
 
 def _submenu_children(ctx: RuleContext) -> set[str]:
@@ -227,8 +278,9 @@ def _check_bookmark(ctx: RuleContext, scope: _Scope, bm: Bookmark, submenu: set[
             have += [f for f in _fields(_container_picks(bm, dropdown)) if f not in have]
         missing = [r for r in rows if r not in have]
         if missing:
+            holding = f"the dropdowns hold {have}" if have else "the dropdowns hold nothing"
             ctx.add("ABK010", path, dn, f"{dn!r}: row field(s) {missing} have no dropdown "
-                    f"filter (the dropdowns hold {have})")
+                    f"filter ({holding})")
 
     # T3: the matrix is captured and visible
     matrix = containers.get(scope.matrix_id)
@@ -271,7 +323,7 @@ def _check_slots(ctx: RuleContext, scope: _Scope, bm: Bookmark, single: dict, ro
     dn, path = bm.display_name, bm.path
     declared = scope.declared(role)
     slots = dig(single, "parameters", role)
-    if slots is None and strict:
+    if not slots and strict:
         ctx.add("ABK009", path, f"{dn} / {role}", f"{dn!r}: no {role} slot map")
         return
     slots = slots if isinstance(slots, list) else []
@@ -283,16 +335,22 @@ def _check_slots(ctx: RuleContext, scope: _Scope, bm: Bookmark, single: dict, ro
     offset, concat, flagged = 0, [], False
     for param, slot in zip(declared, slots):
         slicer = scope.slicer_for.get(param)
-        if slicer is None and strict:
+        if slicer is None:
             ctx.add("ABK009", path, f"{dn} / {role}:{param}",
-                    f"{dn!r}: no known slicer for parameter {param!r}")
+                    f"{dn!r}: no known slicer for parameter {param!r}; set it in "
+                    f"[answer_bookmarks] slicers")
             return
         picks = _fields(_container_picks(bm, slicer))
         if slot.get("index") != offset or slot.get("length") != len(picks):
             flagged = True
+            index, length = slot.get("index"), slot.get("length")
+            outside = picks
+            if isinstance(index, int) and isinstance(length, int):
+                inside = range(index, index + length)
+                outside = [p for i, p in enumerate(picks, start=offset) if i not in inside]
             ctx.add("ABK009", path, f"{dn} / {role}:{param}",
-                    f"{dn!r}: {param!r} owns slots ({slot.get('index')}, "
-                    f"{slot.get('length')}) but its {len(picks)} pick(s) start at {offset}")
+                    f"{dn!r}: {param!r} owns slots ({index}, {length}) but its "
+                    f"{len(picks)} pick(s) start at {offset}; outside its slots: {outside}")
         concat += picks
         offset += len(picks)
     if flagged and strict:
@@ -306,7 +364,9 @@ def _check_slots(ctx: RuleContext, scope: _Scope, bm: Bookmark, single: dict, ro
 
 def _check_page_wells(ctx: RuleContext, scope: _Scope) -> None:
     slot_table = ctx.settings.placeholders.template_slot_table
-    stems = {b.path.name[: -len(".bookmark.json")] for b in ctx.bookmarks}
+    # the bookmark files on disk, parsed or not
+    stems = {p.name[: -len(".bookmark.json")]
+             for p in (ctx.report_dir / "definition" / "bookmarks").glob("*.bookmark.json")}
     for visual in scope.main.visuals:
         for role, block in visual.query_state.items():
             if not isinstance(block, dict) or not block.get("fieldParameters"):
@@ -323,7 +383,7 @@ def _check_page_wells(ctx: RuleContext, scope: _Scope) -> None:
                         f"field parameters; they render in every bookmark")
         if visual.vtype == "bookmarkNavigator":
             text = json.dumps(dig(visual.data, "visual", "objects"))
-            match = re.search(r"selectedBookmark.*?[\"']([0-9a-fA-F]{20})[\"']", text)
+            match = re.search(r"selectedBookmark.*?'([0-9a-f]{20})'", text)
             if match and match.group(1) not in stems:
                 ctx.add("PGW002", visual.path, visual.folder,
                         f"navigator {visual.folder!r} selects bookmark "
@@ -364,13 +424,15 @@ def check_bookmark_literals(ctx: RuleContext) -> None:
     if ctx.model is None:
         ctx.missing_model("bookmark-literals")
         return
+    report_unreadable(ctx)
     registry = _registry(ctx)
     pickers = _picker_slicers(ctx)
     only = ctx.options.get("only_display_names")
-    checked = 0
+    checked = scanned = resolved = 0
     for bm in ctx.bookmarks:
         if only is not None and bm.display_name not in only:
             continue
+        scanned += 1
         for cid, container in bm.containers().items():
             found = sorted({f"'{t}'[{f}]" for t, f in selection_literals(container)})
             for lit in found:
@@ -380,6 +442,7 @@ def check_bookmark_literals(ctx: RuleContext) -> None:
                 subject = f"{bm.display_name} / {cid} / {lit}"
                 if table is not None:
                     if lit in registry.get(table, set()):
+                        resolved += 1
                         continue
                     if anywhere:
                         ctx.add("BML001", bm.path, subject,
@@ -393,11 +456,24 @@ def check_bookmark_literals(ctx: RuleContext) -> None:
                     ctx.add("BML002", bm.path, subject,
                             f"{lit} (container {cid!r}) is not registered in any field "
                             f"parameter")
+                else:
+                    resolved += 1
     ctx.checked["bookmark-literals"] = checked
+    ctx.details["bookmark-literals"] = {"bookmarks scanned": scanned,
+                                        "literals checked": checked,
+                                        "literals resolved": resolved}
 
 
 def load_display_name_filter(path: Path) -> set[str]:
+    """Display names from a JSON list of names, or of entries with a ``displayName``.
+
+    The second form is the ``bookmarks build`` entries file.
+    """
     data = load_json(path)
-    if not isinstance(data, list) or not all(isinstance(x, str) for x in data):
-        raise ValueError(f"{path} must hold a JSON list of bookmark display names")
-    return set(data)
+    if isinstance(data, list):
+        if all(isinstance(x, str) for x in data):
+            return set(data)
+        if all(isinstance(x, dict) and isinstance(x.get("displayName"), str) for x in data):
+            return {x["displayName"] for x in data}
+    raise ValueError(f"{path} must hold a JSON list of bookmark display names, or a "
+                     f"list of entries that each have a displayName")

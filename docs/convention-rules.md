@@ -70,6 +70,8 @@ row_dropdowns = ["<visual id>"]           # optional; slicers on panel.filter_ta
 inherited_fingerprints = []
 submenu_prefix = "Submenu"
 slot_mode = "values-only"                 # or "all-roles"
+baseline = "answer-floors.json"           # optional; used without --baseline,
+                                          # relative to this file
 ```
 
 Terms used below:
@@ -205,8 +207,54 @@ bookmark's display name, so a baseline entry reads
 Selections are read only from each slicer's saved filter, never from its
 cached display items. Page and visual ids are discovered when not configured;
 a main page or matrix that cannot be determined is a setup error (exit 2),
-not a pass. Overlapping parameter slots on any page are the integrity rule's
-`FPM001` / `FPM002`.
+not a pass. So is a row parameter whose slicer cannot be determined (no
+main-page slicer, or several, reference only that table): the error names
+the candidates and the `[answer_bookmarks] slicers` key to set. A matrix with
+no row parameter is noted under `skipped` (`ABK004`'s row comparison and
+`ABK010` are not run). Overlapping parameter slots on any page are the
+integrity rule's `FPM001` / `FPM002`. A bookmark file or main-page visual that
+does not parse is a `JSN001` error, so the run fails instead of skipping it.
+`ABK000` can never be accepted by a baseline: `--update-baseline` does not
+write it, drops an entry for it, and exits 1 while it occurs. The text output
+ends with what was checked (`checked  answer-bookmarks: N answer bookmarks`);
+`--json` has the same counts under `checked`.
+
+Fix page-level findings (`PGW001`, `PGW002`) first: they reproduce in every
+bookmark, so capture-level findings are only meaningful once the page is
+right.
+
+- `ABK000`: nothing matched, so every other check passed vacuously. Fix the
+  `[answer_bookmarks] prefixes` setting (or the bookmark names).
+- `ABK001`: a bookmark with a list in `targetVisualNames` applies only to
+  those visuals, so its picker selections and filters are ignored; a missing
+  key makes the menu entry unclickable. Re-capture the bookmark with no
+  visual selected, or set the key to `[]` in the bookmark file.
+- `ABK003`: the matrix is hidden on the page and shown only by each answer
+  bookmark's capture. Re-capture with the matrix visible.
+- `ABK004`: the matrix rows saved in the capture are what Power BI shows; rows
+  that differ from the row picker, or a field inherited from the bookmark it
+  was cloned from, show another question's answer. Rebuild the bookmark with
+  `bookmarks build`.
+- `ABK005`: active `Values` projections or expansion states pin the
+  layout of the bookmark it was copied from. Rebuild it.
+- `ABK006`: a picker captured with no selection leaves its visual empty.
+  Every main-page selector slicer, row dropdown and configured slicer that a
+  bookmark captures must select something. Pick a field and re-capture.
+- `ABK007`: without a pinned analysis category the pickers offer every
+  field. Set the category filter and re-capture.
+- `ABK008`: only children of a `Submenu` group get a menu entry. Add the
+  bookmark to a submenu group in `bookmarks.json`.
+- `ABK009`: each parameter owns a slot range of the well; a pick outside its
+  range renders nothing. The message names the picks outside their slots.
+  Rebuild the bookmark.
+- `ABK010`: each row field needs a dropdown filter so readers can narrow it.
+  The message says what the dropdowns hold (or that they hold nothing).
+  Mirror the rows into the dropdowns, or rebuild the bookmark.
+- `PGW001`: a raw measure in a parameter well renders in every bookmark and
+  no bookmark can remove it. Remove it from the page's `visual.json`.
+- `PGW002`: the navigator's selected bookmark (a quoted 20-character
+  lower-case hex id) has no bookmark file on disk. Point it at an existing
+  bookmark.
 
 ## bookmark-literals
 
@@ -219,6 +267,14 @@ the active section is checked:
   one behind this picker.
 - `BML002`: the literal is registered in no selector.
 
+`--only-display-names` takes a JSON list of names, or the `bookmarks build`
+entries file (a list of objects with a `displayName`). The text output ends
+with the bookmarks scanned, literals checked and literals resolved (`--json`:
+`checked`). Without a usable paired model the rule cannot judge a report:
+when no report of the run was judged it is a setup error (exit 2) naming
+`--model`; otherwise the report is listed under `skipped`. An unreadable
+bookmark file is a `JSN001` error.
+
 ## --summary
 
 `check --summary` runs `slicer-gates`, `category-filter`, `theme` and
@@ -226,3 +282,12 @@ the active section is checked:
 passed (failures among its critical ids) and whether it is compliant (no
 error finding at all), plus
 the overall percentage. It never fails; `--json` adds a `compliance` object.
+Each finding is followed by a one-line remediation hint (`fix:`; a `fix`
+field on each finding in `--json`).
+
+## Baselines
+
+`--baseline FILE` accepts the findings it lists; only others fail the run.
+Accepted entries of this run's rules and reports that no longer occur are
+listed as `healed`, with a hint that `--update-baseline` locks the
+improvement in; entries of other rules or reports are never called healed.

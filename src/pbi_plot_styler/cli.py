@@ -45,7 +45,7 @@ from .colors import reset as color_reset
 from .colors import sync as color_sync
 from .labels import LabelRenameError, rename_labels
 from .rename import count_measure_refs, rename_measure, report_roots
-from .rules import SUMMARY_RULES, RuleContext, RuleError, rules
+from .rules import SUMMARY_RULES, UNBASELINABLE, RuleContext, RuleError, fix_hint, rules
 from .rules.answers import load_display_name_filter
 from .tmdl import SemanticModel
 
@@ -581,6 +581,20 @@ def check(
         )
     if dry_run and not fix:
         raise StylerError("--dry-run only applies to --fix: add --fix to preview the fixes.")
+    if config_path is None:
+        default_config = Path.cwd() / DEFAULT_CONFIG_FILENAME
+        if default_config.is_file():
+            config_path = default_config
+    elif not config_path.is_file():
+        raise StylerError(f"config file {config_path} does not exist. Check the --config path.")
+    try:
+        settings = load_settings(config_path)
+    except SettingsError as exc:
+        raise StylerError(str(exc)) from exc
+    configured_baseline = settings.answer_bookmarks.baseline
+    if baseline_path is None and configured_baseline and "answer-bookmarks" in slugs:
+        # [answer_bookmarks] baseline, relative to the config file
+        baseline_path = (config_path.parent if config_path else Path.cwd()) / configured_baseline
     if update_baseline and baseline_path is None:
         raise StylerError("--update-baseline needs --baseline FILE to write to.")
     accepted: set[tuple[str, str]] = set()
@@ -594,17 +608,9 @@ def check(
             accepted = load_baseline(baseline_path)
         except (ValueError, json.JSONDecodeError) as exc:
             raise StylerError(str(exc)) from exc
+    # a guard finding means nothing was checked: no baseline may accept it
+    accepted = {k for k in accepted if k[0] not in UNBASELINABLE}
 
-    if config_path is None:
-        default_config = Path.cwd() / DEFAULT_CONFIG_FILENAME
-        if default_config.is_file():
-            config_path = default_config
-    elif not config_path.is_file():
-        raise StylerError(f"config file {config_path} does not exist. Check the --config path.")
-    try:
-        settings = load_settings(config_path)
-    except SettingsError as exc:
-        raise StylerError(str(exc)) from exc
     options: dict = {}
     if only_names is not None:
         try:
@@ -633,6 +639,7 @@ def check(
     findings: list[Finding] = []
     skipped_notes: list[str] = []
     checked: dict[str, int] = {}
+    details: dict[str, dict[str, int]] = {}
 
     def keep_notes(ctx: RuleContext) -> None:
         skipped_notes.extend(n for n in ctx.skipped if n not in skipped_notes)
@@ -673,21 +680,33 @@ def check(
         keep_notes(ctx)
         for slug, n in ctx.checked.items():
             checked[slug] = checked.get(slug, 0) + n
+        for slug, counts in ctx.details.items():
+            total = details.setdefault(slug, {})
+            for what, n in counts.items():
+                total[what] = total.get(what, 0) + n
 
+    if "bookmark-literals" in slugs and "bookmark-literals" not in checked:
+        raise StylerError(
+            "bookmark-literals judged no report: it needs the paired semantic model "
+            "(definition.pbir next to a local *.SemanticModel); pass --model "
+            "<*.SemanticModel folder>")
     current = {f.key for f in findings}
     new = [f for f in findings if f.key not in accepted]
-    healed = sorted(accepted - current)
+    in_scope = _baseline_scope(registry, slugs, report_labels.values())
+    healed = sorted(k for k in accepted - current if in_scope(k))
+    guards = [f for f in findings if f.check_id in UNBASELINABLE]
     if update_baseline:
-        in_scope = _baseline_scope(registry, slugs, report_labels.values())
         kept = []
         if baseline_path.is_file():
             try:
-                kept = [k for k in load_baseline(baseline_path) if not in_scope(k)]
+                kept = [k for k in load_baseline(baseline_path)
+                        if not in_scope(k) and k[0] not in UNBASELINABLE]
             except (ValueError, json.JSONDecodeError) as exc:
                 raise StylerError(str(exc)) from exc
-        write_baseline(baseline_path, findings, keep=kept)
+        write_baseline(baseline_path, [f for f in findings if f.check_id not in UNBASELINABLE],
+                       keep=kept)
     new_errors = [f for f in new if f.severity == "error"]
-    failing = bool(new_errors) and not update_baseline and not summary
+    failing = (bool(new_errors) and not update_baseline or bool(guards)) and not summary
     exit_code = EXIT_DRIFT if failing or (dry_run and planned) else EXIT_OK
     compliance = _compliance(registry, findings, checked) if summary else None
 
@@ -698,8 +717,11 @@ def check(
             "rules": slugs,
             "reports": [r.relative_to(root).as_posix() for r in reports],
             "findings": [
-                {**f.to_dict(), "baselined": f.key in accepted} for f in findings
+                {**f.to_dict(), "baselined": f.key in accepted,
+                 **({"fix": fix_hint(f.check_id)} if summary else {})}
+                for f in findings
             ],
+            "checked": details,
             "healed": [{"id": i, "location": loc} for i, loc in healed],
             "fixed": [
                 {"file": p.relative_to(root).as_posix(), "change": d} for p, d in fixed
@@ -741,6 +763,10 @@ def check(
             click.echo(f"{f.severity.upper():<8} {f.check_id}  {f.file}: {f.message}")
         for check_id, location in healed:
             click.echo(f"healed   {check_id}  {location}")
+        if healed:
+            click.echo("hint: run with --update-baseline to lock the improvement in.")
+        for slug, counts in details.items():
+            click.echo(f"checked  {slug}: " + ", ".join(f"{n} {what}" for what, n in counts.items()))
         if compliance is not None:
             click.echo(_compliance_text(compliance, findings))
         errors = sum(f.severity == "error" for f in new)
@@ -756,7 +782,11 @@ def check(
             )
         click.echo(text + ".")
         if update_baseline:
-            click.echo(f"Wrote {len(current)} finding(s) to {baseline_path}.")
+            written = len(current) - len({f.key for f in guards})
+            click.echo(f"Wrote {written} finding(s) to {baseline_path}.")
+            if guards:
+                click.echo(f"{guards[0].check_id} is never written to a baseline: "
+                           f"{guards[0].message}")
 
     sys.exit(exit_code)
 
@@ -920,6 +950,7 @@ def _compliance_text(compliance: dict, findings: list[Finding]) -> str:
         for f in findings:
             if f.check_id in registry[row["rule"]].ids:
                 lines.append(f"  - {f.severity} {f.check_id} {f.subject}: {f.message}")
+                lines.append(f"    fix: {fix_hint(f.check_id)}")
     lines.append("")
     lines.append(
         f"Compliance: {compliance['compliant_rules']}/{compliance['total_rules']} "
