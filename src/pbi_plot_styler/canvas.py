@@ -139,9 +139,11 @@ class Settings:
 
 
 def _matches(name: str | None, patterns: Iterable[str]) -> bool:
+    """Whether ``name`` matches one of the shell-style patterns, ignoring case."""
     if not isinstance(name, str):
         return False
-    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+    lowered = name.lower()
+    return any(fnmatch.fnmatchcase(lowered, p.lower()) for p in patterns)
 
 
 #: TOML section -> (Settings attribute, section class)

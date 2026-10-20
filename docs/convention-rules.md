@@ -103,10 +103,20 @@ when one of its conditions compares the measure greater than 0 (kind 1 with
 - `GAT002`: a bookmark capture of a selector slicer on a canvas page has no
   active gate under `filters.byName`, so applying the bookmark removes it.
 
+A slicer or capture is compliant when any filter bound to the gate measure is
+active. Selector-table patterns (`[canvas] selector_tables`) match names
+ignoring case. With `[gates] name_heuristic = true` (off by default) the
+check also treats a slicer whose name contains both `slicer` and `selector`
+as a selector slicer; this only adds findings and never makes `--fix` gate
+such a slicer.
+
 `--fix` binds the gate to the table that declares `f-Slicer` in the paired
-model (never to whatever a stale binding names), replacing an existing
-binding and keeping its name, or appending one. With no declaring table the
-run stops with exit `2` and writes nothing.
+model (never to whatever a stale binding names), repairing the first bound
+filter (keeping its name; a bookmark gate's name is its `byName` key) only
+when none is active, or appending one. The filter alias is always the letter
+of `[gates] table` (`f`), whatever table declares the measure. A report whose
+model declares no such table is left unchanged with a `REFUSED` line; the
+other reports are still fixed and the exit code comes from the re-check.
 
 ## slicer-mode-gates
 
@@ -121,9 +131,12 @@ run exits `2`.
 - `GAT005`: a file holds gate references (a gate `Measure`, or the `From` of a
   filter that mentions a gate) that name another table.
 
-`--fix` writes the gates and repoints stale references. Both gate fixers write
-the same shapes, so running them in either order gives identical files.
-Generated filter names are a stable hash, so reruns agree.
+`--fix` writes the gates and repoints stale references. In a stale filter's
+`From` list only the alias a gate reference uses, or an entry naming the stale
+table, is repointed; other sources are left alone. Both gate fixers write the
+same shapes and name a new bookmark gate the same way, so running them in
+either order gives identical files. Generated filter names are a stable hash,
+so reruns agree.
 
 ## category-filter
 

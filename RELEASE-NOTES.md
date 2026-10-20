@@ -291,6 +291,22 @@
   display name and the filter tables covered. Visual files it rewrites
   write non-ASCII text as `\u` escapes (the builder and the renames write it
   as UTF-8).
+- `slicer-gates`: a slicer or capture is compliant when any filter bound to
+  the gate measure is active (not only the first); the fixer repairs the
+  first bound filter only when none is. A replaced bookmark gate's name
+  equals its `byName` key (both gate rules), and a new bookmark gate gets
+  the same name whichever gate fixer runs first. Gate filters always use the
+  alias letter of `[gates] table`, whatever table declares the measure.
+- Selector-table patterns match case-insensitively.
+- `slicer-gates --fix` over several reports leaves a report whose model does
+  not declare the gate measure unchanged, reports it as `REFUSED` and fixes
+  the others (it stopped the whole run); the exit code comes from the
+  re-check.
+- `slicer-gates`: the optional name heuristic only adds findings; `--fix`
+  never gates a slicer found only by name.
+- BUGFIX (kept): `slicer-mode-gates` still repoints the `From` list of a
+  stale gate filter, but only the alias a gate reference uses or an entry
+  naming the stale table; unrelated sources are left alone.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

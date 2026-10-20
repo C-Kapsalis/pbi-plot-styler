@@ -31,25 +31,32 @@ from . import RuleContext, RuleError, rewrite_json
 
 
 # -- gate shapes ------------------------------------------------------------------
-def gate_body(table: str, measure: str) -> dict:
+def gate_alias(host: str) -> str:
+    """The one ``From`` alias every gate uses: the default host table's letter.
+
+    It stays the same whatever table actually declares the measure.
+    """
+    return qx.alias_of(host, "g")
+
+
+def gate_body(table: str, measure: str, alias: str) -> dict:
     """``[measure] > 0`` over ``table``: the active gate condition."""
-    alias = qx.alias_of(table, "g")
     left = qx.field_ref("Measure", measure, alias=alias)
     return qx.filter_body(alias, table, qx.comparison(1, left, qx.lit("0L")))
 
 
-def visual_gate(table: str, measure: str, name: str) -> dict:
+def visual_gate(table: str, measure: str, name: str, alias: str) -> dict:
     gate: dict = {"name": name, "ordinal": 1}
     gate["field"] = qx.measure(table, measure)
     gate["type"] = "Advanced"
-    gate["filter"] = gate_body(table, measure)
+    gate["filter"] = gate_body(table, measure, alias)
     gate["howCreated"] = "User"
     return gate
 
 
-def bookmark_gate(table: str, measure: str, name: str) -> dict:
+def bookmark_gate(table: str, measure: str, name: str, alias: str) -> dict:
     gate: dict = {"name": name, "type": "Advanced"}
-    gate["filter"] = gate_body(table, measure)
+    gate["filter"] = gate_body(table, measure, alias)
     gate["expression"] = qx.measure(table, measure)
     gate["howCreated"] = 1
     return gate
@@ -87,6 +94,12 @@ def _first_visual_gate(visual: Visual, measure: str) -> dict | None:
     return next((f for f in _visual_filters(visual) if _bound_to(f, measure, "field")), None)
 
 
+def _has_active_visual_gate(visual: Visual, measure: str) -> bool:
+    """Any filter bound to ``measure`` is active (slicer-gates)."""
+    return any(_bound_to(f, measure, "field") and is_active(f.get("filter"))
+               for f in _visual_filters(visual))
+
+
 def _by_name(container: Any) -> dict:
     found = dig(container, "filters", "byName")
     return found if isinstance(found, dict) else {}
@@ -112,25 +125,31 @@ def gate_state(entry: Any, where: str, table: str | None) -> str:
 
 
 # -- shared fix steps -------------------------------------------------------------
-def _set_visual_gate(visual: Visual, table: str, measure: str) -> None:
+def _set_visual_gate(visual: Visual, table: str, measure: str, alias: str) -> None:
     filters = visual.data.setdefault("filterConfig", {}).setdefault("filters", [])
     for i, existing in enumerate(filters):
         if _bound_to(existing, measure, "field"):
             name = existing.get("name") or _fresh_name(visual.page_id, visual.folder, measure)
-            filters[i] = visual_gate(table, measure, name)
+            filters[i] = visual_gate(table, measure, name, alias)
             return
-    filters.append(visual_gate(table, measure, _fresh_name(visual.page_id, visual.folder, measure)))
+    filters.append(visual_gate(table, measure, _fresh_name(visual.page_id, visual.folder, measure),
+                               alias))
 
 
-def _set_bookmark_gate(container: dict, table: str, measure: str, seed: str) -> None:
+def _capture_seed(page_id: str, container_id: str) -> str:
+    """The seed of a new bookmark gate's name; both gate fixers use it."""
+    return f"{page_id}/{container_id}"
+
+
+def _set_bookmark_gate(container: dict, table: str, measure: str, seed: str, alias: str) -> None:
     by_name = container.setdefault("filters", {}).setdefault("byName", {})
     found = _first_bookmark_gate(container, measure)
     if found is not None:
-        key, entry = found
-        by_name[key] = bookmark_gate(table, measure, entry.get("name") or key)
+        key, _entry = found
+        by_name[key] = bookmark_gate(table, measure, key, alias)  # the name is the map key
     else:
         name = _fresh_name(seed, measure)
-        by_name[name] = bookmark_gate(table, measure, name)
+        by_name[name] = bookmark_gate(table, measure, name, alias)
 
 
 # -- slicer-gates -------------------------------------------------------------------
@@ -142,7 +161,14 @@ class _Capture:
     container: dict
 
 
-def _selector_slicers_on_visible_canvas(ctx: RuleContext) -> list[Visual]:
+def _selector_slicers_on_visible_canvas(ctx: RuleContext, *,
+                                       heuristic: bool = True) -> list[Visual]:
+    """Selector slicers on visible canvas pages.
+
+    With ``heuristic`` (the check only), the optional name heuristic adds
+    slicers whose name holds both ``slicer`` and ``selector``; the fixer
+    never gates those.
+    """
     settings = ctx.settings
     canvas = set(ctx.index.canvas_page_ids(settings))
     found = []
@@ -152,10 +178,10 @@ def _selector_slicers_on_visible_canvas(ctx: RuleContext) -> list[Visual]:
         for visual in page.visuals:
             if visual.vtype != "slicer":
                 continue
-            heuristic = settings.gates.name_heuristic and all(
+            named = heuristic and settings.gates.name_heuristic and all(
                 token in visual.semantic_name.lower() for token in ("slicer", "selector")
             )
-            if slicer_selector_tables(visual, settings) or heuristic:
+            if slicer_selector_tables(visual, settings) or named:
                 found.append(visual)
     return found
 
@@ -176,8 +202,9 @@ def _bookmark_selector_captures(ctx: RuleContext) -> Iterator[_Capture]:
 
 
 def _capture_has_gate(capture: _Capture, measure: str) -> bool:
-    found = _first_bookmark_gate(capture.container, measure)
-    return found is not None and is_active(found[1].get("filter"))
+    """Any filter of the capture bound to ``measure`` is active."""
+    return any(_bound_to(entry, measure, "expression") and is_active(entry.get("filter"))
+               for entry in _by_name(capture.container).values())
 
 
 def check_slicer_gates(ctx: RuleContext) -> None:
@@ -187,8 +214,7 @@ def check_slicer_gates(ctx: RuleContext) -> None:
     if not slicers:
         ctx.skip("slicer-gates: no selector slicer on a visible canvas page")
     for visual in slicers:
-        gate = _first_visual_gate(visual, measure)
-        if gate is None or not is_active(gate.get("filter")):
+        if not _has_active_visual_gate(visual, measure):
             ctx.add("GAT001", visual.path, visual.semantic_name,
                     f"selector slicer {visual.semantic_name!r} has no active "
                     f"[{measure}] > 0 filter, so it is always visible", fixable=True)
@@ -214,22 +240,29 @@ def _declaring_table(model: SemanticModel | None, measure: str, report: str) -> 
 def fix_slicer_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
     measure = ctx.settings.gates.slicer_measure
     slicers = [
-        v for v in _selector_slicers_on_visible_canvas(ctx)
-        if not is_active((_first_visual_gate(v, measure) or {}).get("filter"))
+        v for v in _selector_slicers_on_visible_canvas(ctx, heuristic=False)
+        if not _has_active_visual_gate(v, measure)
     ]
     captures = [c for c in _bookmark_selector_captures(ctx) if not _capture_has_gate(c, measure)]
     if not slicers and not captures:
         return []
-    table = _declaring_table(ctx.model, measure, ctx.label)
+    try:
+        table = _declaring_table(ctx.model, measure, ctx.label)
+    except RuleError as exc:
+        # this report stays as it is; the other reports are still fixed and
+        # the re-check reports what is left
+        ctx.options.setdefault("refused", []).append((ctx.report_dir, str(exc)))
+        return []
+    alias = gate_alias(ctx.settings.gates.table)
     changes: list[tuple[Path, str]] = []
     for visual in slicers:
-        _set_visual_gate(visual, table, measure)
+        _set_visual_gate(visual, table, measure, alias)
         if rewrite_json(visual.path, visual.data):
             changes.append((visual.path, f"active [{measure}] gate on {table!r}"))
     touched: dict[Path, Bookmark] = {}
     for capture in captures:
         _set_bookmark_gate(capture.container, table, measure,
-                           f"{capture.page_id}/{capture.container_id}")
+                           _capture_seed(capture.page_id, capture.container_id), alias)
         touched[capture.bookmark.path] = capture.bookmark
     for path, bookmark in touched.items():
         if rewrite_json(path, bookmark.data):
@@ -274,13 +307,14 @@ def _mode_slicers(ctx: RuleContext) -> list[_ModeSlicer]:
     return found
 
 
-def _mode_captures(ctx: RuleContext, slicers: list[_ModeSlicer]) -> Iterator[tuple[Bookmark, str, dict, str]]:
+def _mode_captures(ctx: RuleContext, slicers: list[_ModeSlicer]
+                   ) -> Iterator[tuple[Bookmark, str, str, dict, str]]:
     wanted = {s.visual.folder: s.measure for s in slicers}
     for bookmark in ctx.bookmarks:
-        for section in bookmark.sections.values():
+        for page_id, section in bookmark.sections.items():
             for cid, container in bookmark.containers(section).items():
                 if cid in wanted and isinstance(container, dict):
-                    yield bookmark, cid, container, wanted[cid]
+                    yield bookmark, page_id, cid, container, wanted[cid]
 
 
 def _stale_refs(node: Any, gate_measures: set[str], table: str, *, repair: bool) -> int:
@@ -303,14 +337,42 @@ def _stale_refs(node: Any, gate_measures: set[str], table: str, *, repair: bool)
                     ref["Entity"] = table
         flt = current.get("filter")
         if isinstance(flt, dict) and _mentions(current, gate_measures):
+            used, stale = _gate_sources(current, gate_measures, table)
             for source in flt.get("From") or []:
-                if isinstance(source, dict) and isinstance(source.get("Entity"), str) \
-                        and source["Entity"] != table:
+                if not isinstance(source, dict) or not isinstance(source.get("Entity"), str) \
+                        or source["Entity"] == table:
+                    continue
+                # only an alias a gate reference uses, or one naming the stale table
+                if source.get("Name") in used or source["Entity"] in stale:
                     count += 1
                     if repair:
                         source["Entity"] = table
         stack.extend(current.values())
     return count
+
+
+def _gate_sources(node: Any, gate_measures: set[str], table: str) -> tuple[set[str], set[str]]:
+    """``(aliases, stale tables)`` the gate measure references under ``node`` use."""
+    aliases: set[str] = set()
+    stale: set[str] = set()
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, list):
+            stack.extend(current)
+            continue
+        if not isinstance(current, dict):
+            continue
+        measure = current.get("Measure")
+        if isinstance(measure, dict) and measure.get("Property") in gate_measures:
+            ref = dig(measure, "Expression", "SourceRef")
+            if isinstance(ref, dict):
+                if isinstance(ref.get("Source"), str):
+                    aliases.add(ref["Source"])
+                if isinstance(ref.get("Entity"), str) and ref["Entity"] != table:
+                    stale.add(ref["Entity"])
+        stack.extend(current.values())
+    return aliases, stale
 
 
 def _mentions(node: Any, gate_measures: set[str]) -> bool:
@@ -344,7 +406,7 @@ def check_mode_gates(ctx: RuleContext) -> None:
                     f"{slicer_mode(visual)} slicer {visual.folder!r}: [{slicer.measure}] "
                     f"gate is {state.replace('_', ' ')} (expected an active gate on "
                     f"{table!r})", fixable=True)
-    for bookmark, cid, container, measure in _mode_captures(ctx, slicers):
+    for bookmark, _page_id, cid, container, measure in _mode_captures(ctx, slicers):
         found = _first_bookmark_gate(container, measure)
         state = gate_state(found[1] if found else None, "expression", table)
         if state != "ok":
@@ -362,17 +424,18 @@ def check_mode_gates(ctx: RuleContext) -> None:
 
 def fix_mode_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
     table = gate_host_table(ctx)
+    alias = gate_alias(ctx.settings.gates.table)
     slicers = _mode_slicers(ctx)
     dirty: dict[Path, Any] = {}
     for slicer in slicers:
         visual = slicer.visual
         if gate_state(_first_visual_gate(visual, slicer.measure), "field", table) != "ok":
-            _set_visual_gate(visual, table, slicer.measure)
+            _set_visual_gate(visual, table, slicer.measure, alias)
             dirty[visual.path] = visual.data
-    for bookmark, cid, container, measure in _mode_captures(ctx, slicers):
+    for bookmark, page_id, cid, container, measure in _mode_captures(ctx, slicers):
         found = _first_bookmark_gate(container, measure)
         if gate_state(found[1] if found else None, "expression", table) != "ok":
-            _set_bookmark_gate(container, table, measure, cid)
+            _set_bookmark_gate(container, table, measure, _capture_seed(page_id, cid), alias)
             dirty[bookmark.path] = bookmark.data
     gate_measures = _gate_measures(ctx)
     for path, data in _report_documents(ctx):
