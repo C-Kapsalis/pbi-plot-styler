@@ -145,6 +145,10 @@
   dropdowns (previously any explicit dropdown stopped all mirroring), and a
   dropdown that receives no row is emptied instead of keeping the base
   bookmark's pick, so the dropdowns hold exactly the rows (no `ABK010`).
+- `bookmarks build --legacy-layout` syncs the values slicers: pickers listed
+  in the new `[bookmarks] legacy_values_slicers` setting are cleared and then
+  set to the first pick of the `legacy_measures` picker, instead of being
+  left empty.
 - Written DAX literals escape names: an apostrophe in a category value or
   the format item is doubled, and a field-parameter pick written by
   `bookmarks build` escapes apostrophes and closing brackets in its table and

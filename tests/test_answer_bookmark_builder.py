@@ -450,3 +450,38 @@ def test_dropdowns_without_a_row_lose_the_base_bookmark_pick(builder, tmp_path):
     assert _picker_values(sec, PICKERS["y_selector_3"]) == [_literal(row)]
     for key in ("y_selector_4", "y_selector_5", "y_selector_6"):
         assert _picker_values_or_none(sec, PICKERS[key]) == [], key
+
+
+def test_legacy_layout_syncs_the_values_slicers_to_the_first_measure(builder, tmp_path):
+    toml = builder / "builder.toml"
+    toml.write_text(toml.read_text(encoding="utf-8").replace(
+        'row_dropdowns = [', 'legacy_values_slicers = ["x_ps1", "x_ps2"]\nrow_dropdowns = ['),
+        encoding="utf-8")
+    measures = [{"table": "Spend Measures", "column": c, "label": c} for c in ("Cost", "Clicks", "CPC")]
+    row = [{"table": "_Campaigns", "column": "Campaign Name", "label": "Campaign"}]
+    cfg = _write_config(tmp_path, [{
+        "displayName": "Spend | Legacy sync", "analysis_category": "Spend",
+        "pickers": {"x_selector_1": measures, "y_selector_2": row}}])
+    result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP, "--legacy-layout")
+    assert result.exit_code == 0, result.output
+    sec = _section(_by_display(builder)["Spend | Legacy sync"])
+    for key in ("x_ps1", "x_ps2"):
+        # cleared of the base pick, then synced to the axis's first pick
+        assert _picker_values(sec, PICKERS[key]) == [_literal(measures[0])], key
+        labels = [i["displayName"] for i in
+                  sec["visualContainers"][PICKERS[key]]["singleVisual"].get("cachedFilterDisplayItems") or []]
+        assert labels in ([], ["Cost"]), key
+    # a picker that is not a values slicer is still emptied
+    sv = sec["visualContainers"][PICKERS["x_selector_2"]]["singleVisual"]
+    assert _general_filter(sv)["Where"] == []
+
+
+def test_legacy_values_slicers_must_be_known_pickers(builder, tmp_path):
+    toml = builder / "builder.toml"
+    toml.write_text(toml.read_text(encoding="utf-8").replace(
+        'row_dropdowns = [', 'legacy_values_slicers = ["nope"]\nrow_dropdowns = ['),
+        encoding="utf-8")
+    cfg = _write_config(tmp_path, [{"displayName": "Spend | X", "pickers": {}}])
+    result = _build(builder, cfg, "--base", BASE_ID, "--group", GROUP, "--legacy-layout")
+    assert result.exit_code == 2
+    assert "legacy_values_slicers" in result.output

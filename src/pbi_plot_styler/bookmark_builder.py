@@ -69,6 +69,8 @@ class BuilderSettings:
     wells: dict[str, tuple[str, ...]] = field(default_factory=dict)
     #: Legacy layout: the picker whose picks fill the matrix Values well.
     legacy_measures: str = "x_selector_1"
+    #: Legacy layout: pickers emptied and then set to the first measure pick.
+    legacy_values_slicers: tuple[str, ...] = ()
 
     def well(self, key: str) -> tuple[str, ...]:
         return self.wells.get(key, ())
@@ -88,8 +90,9 @@ def load_builder_settings(path: Path | None) -> BuilderSettings:
         raise BuildError(f"{path} has unknown key(s) under [bookmarks]: "
                          f"{', '.join(sorted(unknown))}")
     values = dict(body)
-    if "row_dropdowns" in values:
-        values["row_dropdowns"] = tuple(values["row_dropdowns"])
+    for key in ("row_dropdowns", "legacy_values_slicers"):
+        if key in values:
+            values[key] = tuple(values[key])
     if "pickers" in values:
         values["pickers"] = dict(values["pickers"])
     if "wells" in values:
@@ -98,7 +101,12 @@ def load_builder_settings(path: Path | None) -> BuilderSettings:
             raise BuildError(f"[bookmarks] wells has unknown key(s) {sorted(unknown_wells)}; "
                              f"valid keys: {', '.join(_WELL_KEYS)}")
         values["wells"] = {k: tuple(v) for k, v in values["wells"].items()}
-    return BuilderSettings(**values)
+    settings = BuilderSettings(**values)
+    stray = [k for k in settings.legacy_values_slicers if k not in settings.pickers]
+    if stray:
+        raise BuildError(f"[bookmarks] legacy_values_slicers names unknown picker(s) "
+                         f"{stray}; list keys of [bookmarks] pickers")
+    return settings
 
 
 # -- small builders -----------------------------------------------------------------
@@ -244,9 +252,13 @@ class Builder:
         if entry.get("unhide_matrix", True):
             self._matrix(display, containers, effective, entry.get("matrix_sort"))
         self._chart(display, containers, effective, mentioned)
+        axis = picks.get(self.settings.legacy_measures) or []
         for key in self.settings.pickers:
             if picks.get(key):
                 self._set_picker(display, containers, key, picks[key])
+            elif self.legacy and key in self.settings.legacy_values_slicers and axis:
+                # cleared of whatever the base held, then synced to the axis
+                self._set_picker(display, containers, key, axis[:1])
             elif key in picks or self.legacy:
                 self._empty_picker(containers, key)
         if rerendered:
