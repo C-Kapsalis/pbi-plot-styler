@@ -60,7 +60,8 @@ def test_a_dry_run_with_nothing_to_do_exits_0(shop):
     assert run("colors", "sync", *_args(shop), "--apply").exit_code == EXIT_CHANGES
     result = run("colors", "sync", *_args(shop))
     assert result.exit_code == EXIT_NONE, result.output
-    assert "0 change(s)" in result.output
+    assert "would write 0 file(s): 0 colour entry/entries rewritten, 0 added" \
+        in result.output
 
 
 def test_sync_stamps_bar_fill_from_palette_slot(shop):
@@ -345,7 +346,9 @@ def test_sync_keeps_the_palettes_hex_spelling(shop):
     assert _fill(_entry(data_point, "Sales Measures.Revenue")) == {"Literal": {"Value": "'#ABCDEF'"}}
     before = _snapshot(shop)
     result = run("colors", "sync", *_args(shop), "--apply")
-    assert result.exit_code == EXIT_NONE and "0 file(s) written" in result.output
+    assert result.exit_code == EXIT_NONE
+    assert "wrote 0 file(s): 0 colour entry/entries rewritten, 0 added" \
+        in result.output
     assert _snapshot(shop) == before
     # reset still recognises the colour
     assert run("colors", "reset", *_args(shop), "--apply").exit_code == EXIT_CHANGES
@@ -418,7 +421,7 @@ def test_sync_prints_palette_series_and_counts(shop):
     assert "bookmark 'Sales | Both' on combo01:" in out
     assert "Y      Sales Measures.Revenue: order 1, colour #222222" in out
     assert "Y      Sales Measures.Orders: order 2, colour #333333" in out
-    assert "0 entries rewritten, 2 added." in out
+    assert "would write" in out and "0 colour entry/entries rewritten, 2 added" in out
 
 
 def test_line_series_count_in_collisions_and_a_hint_is_printed(shop):

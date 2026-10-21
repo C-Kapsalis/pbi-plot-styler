@@ -211,6 +211,10 @@ class ColorReport:
     written: list[Path] = field(default_factory=list)
     rewritten: int = 0
     added: int = 0
+    #: the files that would change (or did change), in the order the run
+    #: found them: the changed visuals' files first, then the changed
+    #: bookmark files.
+    changed: list[Path] = field(default_factory=list)
 
 
 @dataclass
@@ -540,6 +544,9 @@ def reset(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) ->
 
 
 def _write(dirty: dict[Path, dict], apply: bool, report: ColorReport) -> None:
+    for path in dirty:
+        if path not in report.changed:
+            report.changed.append(path)
     if not apply:
         return
     for path, data in dirty.items():

@@ -1165,14 +1165,41 @@ def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
     for change in result.changes:
         click.echo(f"  {change}")
     if action is color_sync:
-        click.echo(f"{result.rewritten} entr{'y' if result.rewritten == 1 else 'ies'} "
-                   f"rewritten, {result.added} added.")
-    if apply:
+        verb = "wrote" if apply else "would write"
+        click.echo(f"{verb} {len(result.changed)} file(s): "
+                   f"{result.rewritten} colour entry/entries rewritten, "
+                   f"{result.added} added")
+        for path in _sorted_changed(result.changed):
+            click.echo(f"   {_shown_path(report_dir, path)}")
+        if not apply and result.changed:
+            click.echo("")
+            click.echo("(dry run -- pass --apply to write)")
+    elif apply:
         click.echo(f"APPLIED: {len(result.written)} file(s) written.")
     else:
         click.echo(f"DRY RUN: {len(result.changes)} change(s); rerun with --apply to write.")
     pending = bool(result.changes) and not apply
     sys.exit(EXIT_COLORS_PENDING if pending else EXIT_OK)
+
+
+def _sorted_changed(paths: list[Path]) -> list[Path]:
+    """The changed files: the visual files first, then the bookmark files,
+    each in name order."""
+    visuals = sorted((p for p in paths if p.suffix == ".json"
+                      and "bookmark" not in p.name),
+                     key=lambda p: p.as_posix())
+    bookmarks = sorted((p for p in paths if p not in visuals),
+                       key=lambda p: p.as_posix())
+    return visuals + bookmarks
+
+
+def _shown_path(report_dir: Path, path: Path) -> str:
+    """The path as the user sees it: the report folder as it was given,
+    joined with the file's path inside the report."""
+    try:
+        return (report_dir / path.relative_to(report_dir)).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 @colors.command("sync")
