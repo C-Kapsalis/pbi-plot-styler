@@ -81,6 +81,11 @@
 
 ### Changed
 
+- **`colors sync` closes with the original's block.** The summary is
+  `would write <f> file(s): <r> colour entry/entries rewritten, <a> added`,
+  followed by the changed files (three leading spaces each) and, in a dry
+  run, the note `(dry run -- pass --apply to write)`. With `--apply` the
+  first line begins `wrote` and there is no note.
 - **The field parameters are detected from the model, not from their names.**
   With no `--table` and no `[tables] field_parameters` in the config, the
   tool detects the model's field parameters from its TMDL: a calculated
