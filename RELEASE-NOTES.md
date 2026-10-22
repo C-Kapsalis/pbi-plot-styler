@@ -1,5 +1,19 @@
 # Release notes
 
+## Fixes after v1.2.0 (unreleased)
+
+### Fixed
+
+- BUGFIX (kept): `check --summary` reports only the ids its rows count.
+  It printed `ERROR THM006` (and `THM005`) and closed with `Checked 1
+  report(s): 1 error(s), ...` under `Compliance Score: 100.0%`, although
+  the theme row counts only `THM002`, `THM003` and `THM004`. The lint
+  lines, the closing totals and the `--json` `findings` and `summary` now
+  carry the same findings as the compliance report; `THM005` / `THM006`
+  run under `--rule theme`. A summary run with `--baseline` no longer
+  calls their accepted entries healed, and `--update-baseline` keeps them.
+  `--summary` still never fails (exit `0`).
+
 ## Unreleased
 
 ### Added

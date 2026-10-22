@@ -895,6 +895,11 @@ def check(
                 before = len(ctx.findings)
                 registry[slug].check(ctx)
                 added = ctx.findings[before:]
+                if summary:
+                    # the summary reports only the ids its rows count (the
+                    # theme row: THM002-THM004), so the lint lines and the
+                    # closing totals agree with the compliance report
+                    added = [f for f in added if f.check_id in registry[slug].summarised]
                 if not registry[slug].ordered:
                     added = sorted(added, key=lambda f: (f.file, f.check_id, f.subject))
                 found += added
@@ -925,7 +930,7 @@ def check(
             "<*.SemanticModel folder>")
     current = {f.key for f in findings}
     new = [f for f in findings if f.key not in accepted]
-    in_scope = _baseline_scope(registry, slugs, report_labels.values())
+    in_scope = _baseline_scope(registry, slugs, report_labels.values(), summary)
     healed = sorted(k for k in accepted - current if in_scope(k))
     guards = [f for f in findings if f.check_id in UNBASELINABLE]
     if update_baseline:
@@ -1174,11 +1179,11 @@ def _partial_fix_message(exc: Exception, fixed, root: Path) -> str:
     return "\n".join(lines)
 
 
-def _baseline_scope(registry, slugs, report_labels):
+def _baseline_scope(registry, slugs, report_labels, summary: bool = False):
     """Whether a baseline entry belongs to this run (and is rewritten by it)."""
     ids = {"MDL001"}
     for slug in slugs:
-        ids.update(registry[slug].ids)
+        ids.update(registry[slug].summarised if summary else registry[slug].ids)
     prefixes = tuple(f"{label}/" for label in report_labels)
 
     def in_scope(entry: tuple[str, str]) -> bool:
