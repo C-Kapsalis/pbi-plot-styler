@@ -1,0 +1,15 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "y1_combo_group",
+  "position": {
+    "x": 800,
+    "y": 10,
+    "z": 0,
+    "width": 400,
+    "height": 400
+  },
+  "visualGroup": {
+    "displayName": "y1_combo_group",
+    "groupMode": "ScaleMode"
+  }
+}

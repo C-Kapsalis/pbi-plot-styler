@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "findings": [
+    {
+      "id": "ABK001",
+      "location": "-Insights.Report/definition/bookmarks/c2b3d4e5f6a708192a3b.bookmark.json::CRM Deals | Owners"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+table 'y-Selector 2'
+	lineageTag: 00000000-0000-4000-8000-000000000560
+
+	column 'y-Selector 2'
+		lineageTag: 00000000-0000-4000-8000-000000000561
+		summarizeBy: none
+		sourceColumn: [Value1]
+
+	column 'y-Selector 2 Fields'
+		isHidden
+		lineageTag: 00000000-0000-4000-8000-000000000562
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+	column 'y-Selector 2 Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-4000-8000-000000000563
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	column 'y-Selector 2 Field Category'
+		lineageTag: 00000000-0000-4000-8000-000000000564
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+	partition 'y-Selector 2' = calculated
+		mode: import
+		source =
+				{
+				    ( "Blank Dimension_y", NAMEOF ( '#Report Measures'[z] ), 1, "blank_dimension_y" ),
+				    ( "Channel", NAMEOF ( 'Ad Spend'[Channel] ), 2, "channel" ),
+				    ( "Campaign", NAMEOF ( 'Ad Spend'[Campaign] ), 3, "campaign" )
+				}

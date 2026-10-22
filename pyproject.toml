@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pbi-plot-styler"
-version = "1.1.0"
+version = "1.2.0"
 description = "Make every Power BI combo chart presentation-ready: style series colors and data labels from your model's field parameters, and check PBIP reports for broken bindings and bookmarks."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -40,3 +40,10 @@ packages = ["src/pbi_plot_styler"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "p0: highest-priority report checks",
+    "p1: important report checks",
+    "p2: reporting-only checks",
+    "layer3_5: report-layer (visual and bookmark) tests",
+    "visual_architecture: canvas convention tests",
+]

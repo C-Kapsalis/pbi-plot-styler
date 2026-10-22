@@ -1,0 +1,26 @@
+table '#Report Measures'
+	lineageTag: 00000000-0000-4000-8000-000000000200
+
+	measure Cost = SUM ( 'Ad Spend'[Spend] )
+		formatString: #,##0
+		lineageTag: 00000000-0000-4000-8000-000000000201
+
+	measure Clicks = SUM ( 'Ad Spend'[Clicks] )
+		formatString: #,##0
+		lineageTag: 00000000-0000-4000-8000-000000000202
+
+	column z
+		dataType: string
+		lineageTag: 00000000-0000-4000-8000-000000000203
+		summarizeBy: none
+		sourceColumn: [z]
+
+	column z_space
+		dataType: string
+		lineageTag: 00000000-0000-4000-8000-000000000204
+		summarizeBy: none
+		sourceColumn: [z_space]
+
+	partition '#Report Measures' = calculated
+		mode: import
+		source = { ("", " ") }

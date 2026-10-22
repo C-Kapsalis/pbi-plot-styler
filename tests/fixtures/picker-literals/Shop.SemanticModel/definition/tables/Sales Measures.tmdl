@@ -1,0 +1,8 @@
+table 'Sales Measures'
+
+	measure Revenue = 1
+		formatString: #,##0
+
+	measure Orders = 1
+		formatString: #,##0
+

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/1.4.0/schema.json",
+  "displayName": "Backend | View",
+  "name": "f2f2f2f2f2f2f2f2f2f2",
+  "explorationState": {
+    "version": "1.3",
+    "activeSection": "7a7b7c7d7e7f70717273",
+    "sections": {
+      "7a7b7c7d7e7f70717273": {
+        "visualContainers": {
+          "dropdown01": {
+            "singleVisual": {
+              "visualType": "slicer",
+              "activeProjections": {
+                "Values": [
+                  {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "x-Selector 1"
+                        }
+                      },
+                      "Property": "x-Selector 1 Fields"
+                    }
+                  }
+                ]
+              }
+            },
+            "filters": {
+              "byName": {
+                "f1f1f1f1f1f1f1f1f1f1": {
+                  "name": "f1f1f1f1f1f1f1f1f1f1",
+                  "type": "Advanced",
+                  "filter": {
+                    "Version": 2,
+                    "From": [
+                      {
+                        "Name": "f",
+                        "Entity": "f-Filters",
+                        "Type": 0
+                      }
+                    ],
+                    "Where": []
+                  },
+                  "expression": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "f-Filters"
+                        }
+                      },
+                      "Property": "f-Slicer"
+                    }
+                  },
+                  "howCreated": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

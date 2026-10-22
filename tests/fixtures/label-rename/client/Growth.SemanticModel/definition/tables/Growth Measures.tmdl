@@ -1,0 +1,8 @@
+table 'Growth Measures'
+
+	measure 'Cost per New Customer' = 1
+		formatString: #,##0
+
+	measure 'Cohort Cost per New Customer' = 1
+		formatString: #,##0
+

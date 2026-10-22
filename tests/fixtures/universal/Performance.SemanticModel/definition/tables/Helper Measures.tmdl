@@ -1,0 +1,9 @@
+table 'Helper Measures'
+	lineageTag: 00000000-0000-4000-8000-000000000400
+
+	measure 'Blank Measure Refined' = BLANK ()
+		lineageTag: 00000000-0000-4000-8000-000000000401
+
+	partition 'Helper Measures' = calculated
+		mode: import
+		source = { 1 }

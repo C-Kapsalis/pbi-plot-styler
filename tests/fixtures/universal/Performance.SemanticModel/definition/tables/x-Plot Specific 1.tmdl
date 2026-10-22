@@ -1,0 +1,38 @@
+table 'x-Plot Specific 1'
+	lineageTag: 00000000-0000-4000-8000-000000000510
+
+	column 'x-Plot Specific 1'
+		lineageTag: 00000000-0000-4000-8000-000000000511
+		summarizeBy: none
+		sourceColumn: [Value1]
+
+	column 'x-Plot Specific 1 Fields'
+		isHidden
+		lineageTag: 00000000-0000-4000-8000-000000000512
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+	column 'x-Plot Specific 1 Order'
+		isHidden
+		formatString: 0
+		lineageTag: 00000000-0000-4000-8000-000000000513
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	column 'x-Plot Specific 1 Field Category'
+		lineageTag: 00000000-0000-4000-8000-000000000514
+		summarizeBy: none
+		sourceColumn: [Value4]
+
+	partition 'x-Plot Specific 1' = calculated
+		mode: import
+		source =
+				{
+				    ( "Clicks", NAMEOF ( '#Report Measures'[Clicks] ), 1, "clicks" )
+				}

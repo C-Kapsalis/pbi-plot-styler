@@ -1,0 +1,558 @@
+[
+  {
+    "displayName": "Letters | 1 Overview",
+    "show": [
+      "9ae0cae20f0580ea0fc2",
+      "a1548974e678537e1ad9",
+      "58c07edf66fcc668052a",
+      "72770a4a26a76aa1bb30",
+      "aa1ab50e81c88b8f6c64",
+      "20a92fc55a409a14c50f",
+      "4579e190f16af4b372c6",
+      "71b3f5fce16278017dc3",
+      "25daf9af719298e8d87d",
+      "51bc0fa52fea898c4a86"
+    ],
+    "hide": [
+      "13236d898966a70ca101",
+      "aabeebfe4cbc288aa93c",
+      "0bea7ba6ebd333c7225a",
+      "78f41b1bef429d67e363"
+    ],
+    "pickers": {
+      "x_selector_1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Sent #",
+          "label": "Letters Sent #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Read #",
+          "label": "Letters Read #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Read Rate %",
+          "label": "Read Rate %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Replies #",
+          "label": "Replies #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Reply Rate %",
+          "label": "Reply Rate %"
+        }
+      ],
+      "x_selector_2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Sent #",
+          "label": "Letters Sent #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Read Rate %",
+          "label": "Read Rate %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Reply Rate %",
+          "label": "Reply Rate %"
+        }
+      ],
+      "x_ps1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Sent #",
+          "label": "Letters Sent #"
+        }
+      ],
+      "x_ps2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Replies #",
+          "label": "Replies #"
+        }
+      ],
+      "y_selector_2": [
+        {
+          "table": "_Issues",
+          "column": "Issue Topic",
+          "label": "Topic"
+        }
+      ],
+      "y_selector_3": [
+        {
+          "table": "__Send Calendar",
+          "column": "Send Week",
+          "label": "Send Week"
+        }
+      ],
+      "y_selector_4": [
+        {
+          "table": "_Readers",
+          "column": "Reader Region",
+          "label": "Region"
+        }
+      ],
+      "y_selector_5": [
+        {
+          "table": "_Readers",
+          "column": "Reader Tier",
+          "label": "Tier"
+        }
+      ]
+    },
+    "show_groups": [
+      "ddd6e75a85051a01ff4b"
+    ],
+    "hide_groups": [
+      "ecb92fda9bc396e01423",
+      "fce9948cc134610f7666"
+    ],
+    "date_filter": "this_year",
+    "drill_level": "Month",
+    "analysis_category": "Newsletter Issues"
+  },
+  {
+    "displayName": "Letters | 2 Reach",
+    "show": [
+      "9ae0cae20f0580ea0fc2",
+      "a1548974e678537e1ad9",
+      "58c07edf66fcc668052a",
+      "72770a4a26a76aa1bb30",
+      "aa1ab50e81c88b8f6c64",
+      "20a92fc55a409a14c50f",
+      "4579e190f16af4b372c6",
+      "71b3f5fce16278017dc3",
+      "25daf9af719298e8d87d",
+      "51bc0fa52fea898c4a86"
+    ],
+    "hide": [
+      "13236d898966a70ca101",
+      "aabeebfe4cbc288aa93c",
+      "0bea7ba6ebd333c7225a",
+      "78f41b1bef429d67e363"
+    ],
+    "pickers": {
+      "x_selector_1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Sent #",
+          "label": "Letters Sent #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Returned #",
+          "label": "Letters Returned #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Return Rate %",
+          "label": "Return Rate %"
+        }
+      ],
+      "x_selector_2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Sent #",
+          "label": "Letters Sent #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Returned #",
+          "label": "Letters Returned #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Return Rate %",
+          "label": "Return Rate %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Reach Index",
+          "label": "Reach"
+        }
+      ],
+      "x_ps1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Returned #",
+          "label": "Letters Returned #"
+        }
+      ],
+      "x_ps2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Return Rate %",
+          "label": "Return Rate %"
+        }
+      ],
+      "y_selector_2": [
+        {
+          "table": "__Send Calendar",
+          "column": "Send Week",
+          "label": "Send Week"
+        }
+      ],
+      "y_selector_3": [
+        {
+          "table": "_Issues",
+          "column": "Issue Language",
+          "label": "Language"
+        }
+      ],
+      "y_selector_4": [
+        {
+          "table": "z-Selector Reader Segment",
+          "column": "z-Reader Segment",
+          "label": "Segment"
+        }
+      ],
+      "y_selector_5": [
+        {
+          "table": "_Readers",
+          "column": "Reader Region",
+          "label": "Region"
+        }
+      ]
+    },
+    "show_groups": [
+      "ddd6e75a85051a01ff4b"
+    ],
+    "hide_groups": [
+      "ecb92fda9bc396e01423",
+      "fce9948cc134610f7666"
+    ],
+    "date_filter": "this_year",
+    "drill_level": "Month",
+    "analysis_category": "Newsletter Issues"
+  },
+  {
+    "displayName": "Letters | 3 Interest",
+    "show": [
+      "9ae0cae20f0580ea0fc2",
+      "a1548974e678537e1ad9",
+      "58c07edf66fcc668052a",
+      "72770a4a26a76aa1bb30",
+      "aa1ab50e81c88b8f6c64",
+      "20a92fc55a409a14c50f",
+      "4579e190f16af4b372c6",
+      "71b3f5fce16278017dc3",
+      "25daf9af719298e8d87d",
+      "51bc0fa52fea898c4a86"
+    ],
+    "hide": [
+      "13236d898966a70ca101",
+      "aabeebfe4cbc288aa93c",
+      "0bea7ba6ebd333c7225a",
+      "78f41b1bef429d67e363"
+    ],
+    "pickers": {
+      "x_selector_1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Read #",
+          "label": "Letters Read #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Read Rate %",
+          "label": "Read Rate %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Average Read Minutes",
+          "label": "Read Minutes"
+        }
+      ],
+      "x_selector_2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Read #",
+          "label": "Letters Read #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Read Rate %",
+          "label": "Read Rate %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Average Read Minutes",
+          "label": "Read Minutes"
+        }
+      ],
+      "x_ps1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Read #",
+          "label": "Letters Read #"
+        }
+      ],
+      "x_ps2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Letters Read #",
+          "label": "Letters Read #"
+        }
+      ],
+      "y_selector_2": [
+        {
+          "table": "_Issues",
+          "column": "Issue Topic",
+          "label": "Topic"
+        }
+      ],
+      "y_selector_3": [
+        {
+          "table": "__Send Calendar",
+          "column": "Send Week",
+          "label": "Send Week"
+        }
+      ],
+      "y_selector_4": [
+        {
+          "table": "z-Selector Reader Segment",
+          "column": "z-Reader Segment",
+          "label": "Segment"
+        }
+      ],
+      "y_selector_5": [
+        {
+          "table": "_Issues",
+          "column": "Issue Language",
+          "label": "Language"
+        }
+      ],
+      "y_selector_6": [
+        {
+          "table": "_Readers",
+          "column": "Reader Tier",
+          "label": "Tier"
+        }
+      ]
+    },
+    "show_groups": [
+      "ddd6e75a85051a01ff4b"
+    ],
+    "hide_groups": [
+      "ecb92fda9bc396e01423",
+      "fce9948cc134610f7666"
+    ],
+    "date_filter": "this_year",
+    "drill_level": "Month",
+    "analysis_category": "Newsletter Issues"
+  },
+  {
+    "displayName": "Letters | 4 Response",
+    "show": [
+      "9ae0cae20f0580ea0fc2",
+      "a1548974e678537e1ad9",
+      "58c07edf66fcc668052a",
+      "72770a4a26a76aa1bb30",
+      "aa1ab50e81c88b8f6c64",
+      "20a92fc55a409a14c50f",
+      "4579e190f16af4b372c6",
+      "71b3f5fce16278017dc3",
+      "25daf9af719298e8d87d",
+      "51bc0fa52fea898c4a86"
+    ],
+    "hide": [
+      "13236d898966a70ca101",
+      "aabeebfe4cbc288aa93c",
+      "0bea7ba6ebd333c7225a",
+      "78f41b1bef429d67e363"
+    ],
+    "pickers": {
+      "x_selector_1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Replies #",
+          "label": "Replies #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Reply Rate %",
+          "label": "Reply Rate %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Opt Outs #",
+          "label": "Opt Outs #"
+        }
+      ],
+      "x_selector_2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Replies #",
+          "label": "Replies #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Reply Rate %",
+          "label": "Reply Rate %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Opt Outs #",
+          "label": "Opt Outs #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Opt Out Rate %",
+          "label": "Opt Out Rate %"
+        }
+      ],
+      "x_ps1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Replies #",
+          "label": "Replies #"
+        }
+      ],
+      "x_ps2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Opt Outs #",
+          "label": "Opt-outs #"
+        }
+      ],
+      "y_selector_2": [
+        {
+          "table": "_Issues",
+          "column": "Issue Topic",
+          "label": "Topic"
+        }
+      ],
+      "y_selector_3": [
+        {
+          "table": "_Readers",
+          "column": "Reader Region",
+          "label": "Region"
+        }
+      ],
+      "y_selector_4": [
+        {
+          "table": "_Readers",
+          "column": "Reader Tier",
+          "label": "Tier"
+        }
+      ]
+    },
+    "show_groups": [
+      "ddd6e75a85051a01ff4b"
+    ],
+    "hide_groups": [
+      "ecb92fda9bc396e01423",
+      "fce9948cc134610f7666"
+    ],
+    "date_filter": "this_year",
+    "drill_level": "Month",
+    "analysis_category": "Newsletter Issues"
+  },
+  {
+    "displayName": "Letters | 5 Readership",
+    "show": [
+      "9ae0cae20f0580ea0fc2",
+      "a1548974e678537e1ad9",
+      "58c07edf66fcc668052a",
+      "72770a4a26a76aa1bb30",
+      "aa1ab50e81c88b8f6c64",
+      "20a92fc55a409a14c50f",
+      "4579e190f16af4b372c6",
+      "71b3f5fce16278017dc3",
+      "25daf9af719298e8d87d",
+      "51bc0fa52fea898c4a86"
+    ],
+    "hide": [
+      "13236d898966a70ca101",
+      "aabeebfe4cbc288aa93c",
+      "0bea7ba6ebd333c7225a",
+      "78f41b1bef429d67e363"
+    ],
+    "pickers": {
+      "x_selector_1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Active Readers #",
+          "label": "Active Readers #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "New Readers #",
+          "label": "New Readers #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Reader Growth %",
+          "label": "Reader Growth %"
+        }
+      ],
+      "x_selector_2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Active Readers #",
+          "label": "Active Readers #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "New Readers #",
+          "label": "New Readers #"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Reader Growth %",
+          "label": "Reader Growth %"
+        },
+        {
+          "table": "Newsletter Measures",
+          "column": "Lapsed Readers #",
+          "label": "Lapsed Readers #"
+        }
+      ],
+      "x_ps1": [
+        {
+          "table": "Newsletter Measures",
+          "column": "Active Readers #",
+          "label": "Active Readers #"
+        }
+      ],
+      "x_ps2": [
+        {
+          "table": "Newsletter Measures",
+          "column": "New Readers #",
+          "label": "New Readers #"
+        }
+      ],
+      "y_selector_2": [
+        {
+          "table": "_Readers",
+          "column": "Reader Region",
+          "label": "Region"
+        }
+      ],
+      "y_selector_3": [
+        {
+          "table": "_Readers",
+          "column": "Reader Tier",
+          "label": "Tier"
+        }
+      ]
+    },
+    "show_groups": [
+      "ddd6e75a85051a01ff4b"
+    ],
+    "hide_groups": [
+      "ecb92fda9bc396e01423",
+      "fce9948cc134610f7666"
+    ],
+    "date_filter": "this_year",
+    "drill_level": "Month",
+    "analysis_category": "Newsletter Readers"
+  }
+]

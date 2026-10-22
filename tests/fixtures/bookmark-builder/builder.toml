@@ -1,0 +1,12 @@
+# Answer-bookmark builder settings for the fictional newsletter report.
+[bookmarks]
+base = "bb45beb3422017d5f42c"
+matrix = "9ae0cae20f0580ea0fc2"
+chart = "a1548974e678537e1ad9"
+row_picker = "y_selector_2"
+row_dropdowns = ["y_selector_3", "y_selector_4", "y_selector_5", "y_selector_6"]
+category_column = "Analysis Category"
+calendar_table = "__Calendar"
+calendar_hierarchy = "Date Hierarchy"
+pickers = {x_selector_1 = "58c07edf66fcc668052a", x_selector_2 = "72770a4a26a76aa1bb30", x_ps1 = "aa1ab50e81c88b8f6c64", x_ps2 = "20a92fc55a409a14c50f", y_selector_2 = "4579e190f16af4b372c6", y_selector_3 = "71b3f5fce16278017dc3", y_selector_4 = "25daf9af719298e8d87d", y_selector_5 = "51bc0fa52fea898c4a86", y_selector_6 = "13236d898966a70ca101"}
+wells = {matrix_rows = ["y_selector_2"], matrix_values = ["x_selector_2"], chart_y = ["x_ps1"], chart_y2 = ["x_ps2"], chart_series = ["y_ps"]}

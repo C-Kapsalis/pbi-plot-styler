@@ -1,0 +1,47 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/1.4.0/schema.json",
+  "displayName": "Sales | Both",
+  "name": "b0c0d0e0f0a0b0c0d0e0",
+  "options": {
+    "targetVisualNames": []
+  },
+  "explorationState": {
+    "version": "1.3",
+    "activeSection": "aa11bb22cc33dd44ee55",
+    "sections": {
+      "aa11bb22cc33dd44ee55": {
+        "visualContainers": {
+          "combo01": {
+            "singleVisual": {
+              "visualType": "lineStackedColumnComboChart",
+              "projections": {
+                "Y": [
+                  {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Sales Measures"
+                        }
+                      },
+                      "Property": "Revenue"
+                    }
+                  },
+                  {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Sales Measures"
+                        }
+                      },
+                      "Property": "Orders"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

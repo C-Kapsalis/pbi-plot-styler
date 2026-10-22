@@ -1,0 +1,34 @@
+table 'y-Selector 2'
+	lineageTag: 00000000-0000-0000-0000-481878038413
+
+	column 'y-Selector 2'
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'y-Selector 2 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'y-Selector 2 Fields'
+
+	column 'y-Selector 2 Fields'
+		isHidden
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+	column 'y-Selector 2 Order'
+		isHidden
+		formatString: 0
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	partition 'y-Selector 2' = calculated
+		mode: import
+		source =
+				{
+				    ( "Region", NAMEOF ( 'Stores'[Region] ), 1 )
+				}

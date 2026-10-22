@@ -1,7 +1,9 @@
 """Command-line interface for pbi-plot-styler.
 
-Two commands: ``style`` (the default, so ``pbi-plot-styler REPORT_DIR``
-keeps working exactly as before) and ``check`` (read-only integrity checks).
+Commands: ``style`` (the default, so ``pbi-plot-styler REPORT_DIR`` keeps
+working exactly as before), ``check`` (integrity checks plus the canvas
+convention rules, with optional fixers), ``colors sync|reset``,
+``bookmarks build``, ``rename-measure`` and ``rename-label``.
 
 Style notes (deliberate deviations from the Heroku CLI style guide):
 help descriptions are complete sentences with sentence-case capitalization
@@ -22,21 +24,34 @@ from . import __version__
 from .check import (
     CHECKS,
     Finding,
-    check_report,
-    fix_report,
     load_baseline,
     write_baseline,
 )
-from .config import DEFAULT_CONFIG_FILENAME, ConfigError, build_config
+from .canvas import Settings, SettingsError, load_settings
+from .config import (DEFAULT_CONFIG_FILENAME, ConfigError, build_config,
+                     config_field_parameter_tables)
+from .fieldparams import detect_field_parameters
 from .report import (
     RestyleInvariantError,
     VisualChange,
     apply_changes,
     discover_reports,
+    enclosing_report,
+    is_report_dir,
     plan_changes,
+    report_model_name,
     resolve_model_dir,
     write_zip,
 )
+from .bookmark_builder import BuildError, build_bookmarks, builder_self_test, load_builder_settings
+from .colors import ColorOptions, PaletteError
+from .colors import reset as color_reset
+from .colors import sync as color_sync
+from .labels import LabelRenameError, rename_labels
+from .rename import count_measure_refs, rename_measure, report_roots
+from .rules import (RULE_REPORT, SUMMARY_RULES, UNBASELINABLE, RuleAbort, RuleContext,
+                    RuleError, finding_type, fix_hint, rules)
+from .rules.answers import load_display_name_filter
 from .tmdl import SemanticModel
 
 EXIT_OK = 0
@@ -55,7 +70,7 @@ class StylerError(click.ClickException):
 class DefaultCommandGroup(click.Group):
     """A group that runs ``style`` when the first argument is not a command.
 
-    This keeps the original ``pbi-plot-styler REPORT_DIR [OPTIONS]`` form
+    This keeps the classic ``pbi-plot-styler REPORT_DIR [OPTIONS]`` form
     working unchanged. A report folder literally named like a command
     (``check``) must be passed as ``./check`` or after ``style``.
     """
@@ -74,8 +89,9 @@ class DefaultCommandGroup(click.Group):
 )
 @click.version_option(__version__, prog_name="pbi-plot-styler")
 def main() -> None:
-    """Style Power BI combo charts from their field parameters, and check
-    PBIP reports for broken bindings and bookmarks.
+    """Style Power BI combo charts from their field parameters, check PBIP
+    reports for broken bindings, bookmarks and canvas conventions, and keep
+    colours, bookmarks and renames in step across a report.
 
     Without a command, `style` runs: `pbi-plot-styler REPORT_DIR` is the
     same as `pbi-plot-styler style REPORT_DIR`.
@@ -83,6 +99,12 @@ def main() -> None:
 
 
 # -- shared helpers ------------------------------------------------------------
+def _abort(message: str) -> None:
+    """Print an error line on stderr and exit with EXIT_ERROR."""
+    click.echo(message, err=True)
+    sys.exit(EXIT_ERROR)
+
+
 def _discover(path: Path):
     discovery = discover_reports(path)
     for skipped, reason in discovery.skipped:
@@ -113,7 +135,7 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
 @main.command(DEFAULT_COMMAND)
 @click.argument(
     "report_dir",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=click.Path(path_type=Path),
 )
 @click.option(
     "--model",
@@ -134,8 +156,10 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
     "--table",
     "tables",
     multiple=True,
-    help="Field-parameter table name (repeatable). Overrides the default "
-    "'x-Plot Specific 1' / 'x-Plot Specific 2' / 'y-Plot Specific' trio.",
+    help="Field-parameter table name or shell-style pattern such as 'x-*' "
+    "(repeatable; patterns match the model's tables case-insensitively). "
+    "Overrides the default 'x-Plot Specific 1' / 'x-Plot Specific 2' / "
+    "'y-Plot Specific' trio.",
 )
 @click.option(
     "--rename-table",
@@ -216,11 +240,30 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
     "only where a measure has none; set it to enforce it everywhere.",
 )
 @click.option(
+    "--seed-label-transparency",
+    "label_transparency_seed",
+    type=int,
+    default=None,
+    help="Seed this data-label background transparency (0-100) where a "
+    "measure has none, never overwriting an existing value.",
+)
+@click.option(
     "--show-labels/--hide-labels",
     "show_labels",
     default=None,
     help="Turn data labels on or off. Default: on for visuals without "
     "label settings; existing settings are kept unless this is set.",
+)
+@click.option(
+    "--rebind-stale-line",
+    "rebind_stale_line",
+    is_flag=True,
+    default=None,
+    help="Before styling, point a line (Y2) measure projection whose name "
+    "the model no longer declares at the current measure: leading symbols "
+    "are stripped, then an exact name or a single case-insensitive match in "
+    "the same table wins. The column role (Y) then counts as column side "
+    "unless --exclude-role is given. Off by default.",
 )
 @click.option(
     "--dry-run",
@@ -252,19 +295,24 @@ def style(
     label_color: str | None,
     label_background: str | None,
     label_transparency: int | None,
+    label_transparency_seed: int | None,
     show_labels: bool | None,
+    rebind_stale_line: bool | None,
     dry_run: bool,
     zip_path: Path | None,
 ) -> None:
     """Style every combo chart in REPORT_DIR from its field parameters.
 
     REPORT_DIR is a PBIP *.Report folder, or any folder containing one or
-    more of them (searched recursively). Reads the measures declared in
+    more of them (searched recursively), or a page folder or visual.json
+    inside a report (only the visuals under it are restyled). Reads the measures declared in
     each report's semantic-model field-parameter tables and rebuilds each
     targeted visual's series colors, data labels, and label backgrounds,
     deterministically and idempotently, keeping every other formatting
     entry intact.
     """
+    if not report_dir.exists():
+        _abort(f"ERROR: {report_dir.resolve()} does not exist")
     if config_path is None:
         default_config = Path.cwd() / DEFAULT_CONFIG_FILENAME
         if default_config.is_file():
@@ -279,6 +327,11 @@ def style(
                 f"For example: --rename-table \"y-Plot Specific=Set Lines\"."
             )
         table_renames[name.strip()] = new_name.strip()
+    # The field-parameter set is the EXPLICIT list when the user gives one
+    # (the `--table` option or the config's tables); otherwise the model's
+    # own field parameters are detected from its TMDL.
+    explicit_tables = bool(tables) or bool(config_field_parameter_tables(
+        config_path))
     pins = _parse_pairs(
         color_pins, "--color", '"Sales Measures.Revenue=#7A4419"'
     )
@@ -298,48 +351,101 @@ def style(
             label_color=label_color,
             label_background=label_background,
             label_transparency=label_transparency,
+            label_transparency_seed=label_transparency_seed,
             show_labels=show_labels,
+            rebind_stale_line=rebind_stale_line,
         )
     except ConfigError as exc:
         raise StylerError(str(exc)) from exc
 
-    discovery = _discover(report_dir)
+    within: Path | None = None
+    if report_dir.is_file() or not is_report_dir(report_dir) and enclosing_report(report_dir):
+        # a page folder or a visual file: restyle only what lies under it
+        enclosing = enclosing_report(report_dir)
+        if enclosing is None:
+            raise StylerError(
+                f"{report_dir} is not inside a *.Report folder. Pass a report "
+                f"folder, a folder of reports, a page folder or a visual.json.")
+        within, report_dir = report_dir.resolve(), enclosing
+    discovery = discover_reports(report_dir)
+    if not discovery.reports:
+        raise StylerError(
+            f"no *.Report folders found under {report_dir}. Pass a PBIP report "
+            f"folder (one containing definition.pbir and definition/pages), "
+            f"or a folder that contains one or more of them."
+        )
     root = report_dir
     models: dict[Path, SemanticModel] = {}
     changes: list[VisualChange] = []
     all_keys: set[str] = set()
+    #: the combo visuals of a report the run could not pair with a model.
+    skipped_visuals: list[str] = []
+    #: visual files that do not parse: (path, the JSON error).
+    unreadable: list[tuple[Path, str]] = []
+    # A report that cannot be paired with a model is skipped; a report whose
+    # model has no usable field parameters is an error unless the run sweeps
+    # several reports and no --model was named.
+    lenient = not discovery.single and model_dir is None
 
     for report in discovery.reports:
-        if not discovery.single:
-            click.echo(f"Report:   {report.relative_to(root).as_posix()}")
         try:
             resolved_model = (model_dir or resolve_model_dir(report)).resolve()
             if resolved_model not in models:
                 models[resolved_model] = SemanticModel.load(resolved_model)
             model = models[resolved_model]
-            measure_keys = model.field_parameter_measures(
-                config.field_parameter_tables
-            )
-        except (FileNotFoundError, LookupError) as exc:
-            raise StylerError(str(exc)) from exc
+        except (FileNotFoundError, LookupError, OSError, ValueError):
+            skipped_visuals += _combo_visuals(report, config.visual_types)
+            continue
+        try:
+            detected = detect_field_parameters(model.raw_by_table,
+                                               model.measures_by_table)
+            if explicit_tables:
+                # the user's list: the expansion is restricted as in the
+                # original
+                tables = _expand_tables(config.field_parameter_tables, model)
+                field_parameters = tables
+            else:
+                # no explicit list: the model's own field parameters are
+                # detected from its TMDL. The measures the styling drives
+                # come from the METRIC parameters (the ones whose rows
+                # point at measures); the column wells and the excluded
+                # roles work on the DIMENSION ones (the ones whose rows
+                # point at columns).
+                tables = (tuple(p.name for p in detected.metric)
+                          or tuple(detected.names))
+                field_parameters = tuple(detected.names)
+                if detected.parameters:
+                    click.echo(
+                        f"Field parameters: {', '.join(detected.names)}"
+                        + (f" (dimension: {', '.join(detected.dimension_names)}; "
+                           f"metric: {', '.join(detected.metric_names)})"
+                           if detected.metric or detected.mixed else ""))
+            measure_keys = model.field_parameter_measures(tables) if tables else []
+        except (FileNotFoundError, LookupError, OSError, ValueError) as exc:
+            if not lenient:
+                raise StylerError(str(exc)) from exc
+            skipped_visuals += _combo_visuals(report, config.visual_types)
+            continue
 
         if not measure_keys:
-            raise StylerError(
-                f"no measures resolved from field-parameter tables "
-                f"{list(config.field_parameter_tables)} in {resolved_model}, "
-                f"so there is nothing to style. The tables exist, but none "
-                f"of their NAMEOF references match a measure declared in the "
-                f"model. Check that the configured tables reference "
-                f"measures, not only columns."
-            )
+            if not lenient:
+                raise StylerError(
+                    f"no measures resolved from field-parameter tables "
+                    f"{list(config.field_parameter_tables)} in {resolved_model}, "
+                    f"so there is nothing to style. The tables exist, but none "
+                    f"of their NAMEOF references match a measure declared in the "
+                    f"model. Check that the configured tables reference "
+                    f"measures, not only columns."
+                )
+            skipped_visuals += _combo_visuals(report, config.visual_types)
+            continue
         all_keys.update(k.lower() for k in measure_keys)
 
-        click.echo(f"Model:    {resolved_model}")
-        click.echo(f"Measures: {len(measure_keys)} drive the styling")
-
+        # every field parameter of the model can bind an excluded role
+        # (v1.1.0 behaviour), not only the configured or matched tables
         catalogs = {
             table: [e.key for e in model.parameter_catalog(table)]
-            for table in model.raw_by_table
+            for table in (field_parameters or model.raw_by_table)
         }
         try:
             changes.extend(
@@ -348,7 +454,10 @@ def style(
                     measure_keys,
                     config,
                     catalogs={t: k for t, k in catalogs.items() if k},
-                    slots=model.palette_slots(config.field_parameter_tables),
+                    slots=model.palette_slots(tables),
+                    model=model,
+                    within=within,
+                    errors=unreadable,
                 )
             )
         except FileNotFoundError as exc:
@@ -367,7 +476,10 @@ def style(
             f"as the model declares it."
         )
 
-    if not changes:
+    for path, reason in unreadable:
+        click.echo(f"  ERROR reading {path}: {reason}", err=True)
+
+    if not changes and not skipped_visuals and not unreadable:
         raise StylerError(
             f"no targeted visuals found in {len(discovery.reports)} "
             f"report(s) under {root}: no visual has a visualType in "
@@ -376,37 +488,142 @@ def style(
         )
 
     pending = [c for c in changes if c.changed]
+    for name in skipped_visuals:
+        click.echo(f"  {name}: SKIPPED - no paired SemanticModel "
+                   f"(missing definition.pbir / no x-Selector measures)")
     if dry_run:
         for change in pending:
-            click.echo()
-            click.echo(change.unified_diff(root), nl=False)
-        click.echo(
-            f"\n{len(pending)}/{len(changes)} visual(s) would change."
-            if pending
-            else f"\nAll {len(changes)} visual(s) already styled."
-        )
+            _dry_run_block(change)
     else:
+        for change in changes:
+            for rb in change.rebinds:
+                click.echo(f"  {change.path.parent.name}: Y2 rebound  "
+                           f"{rb.entity!r}.{rb.old!r}  ->  {rb.entity!r}.{rb.new!r}")
         written = apply_changes(changes)
         for change in pending:
-            click.echo(f"  styled {change.path.relative_to(root).as_posix()}")
-        click.echo(
-            f"\nRestyled {written}/{len(changes)} visual(s); "
-            f"{len(changes) - written} already styled."
-        )
+            click.echo(_result_line(change))
+    rebinds = sum(len(c.rebinds) for c in changes)
+    total = len(changes) + len(skipped_visuals) + len(unreadable)
+    skip_note = f" ({len(skipped_visuals) + len(unreadable)} skipped)" if (
+        skipped_visuals or unreadable) else ""
+    click.echo()
+    click.echo(f"Models resolved: {len(models)}")
+    if dry_run:
+        if pending or unreadable:
+            click.echo(f"{len(pending)}/{total} combo chart(s) need rebuild{skip_note} "
+                       f"(re-run without --dry-run).")
+        else:
+            click.echo(f"All {total} combo chart(s) already in sync{skip_note}.")
+    else:
+        line = f"rebuilt {written}/{total} combo chart(s){skip_note}"
+        if rebinds:
+            line += f" / rebound {rebinds} stale Y2 projection(s)"
+        click.echo(line + ".")
 
     if zip_path is not None:
         write_zip(discovery.reports, changes, zip_path, base=root.parent)
         click.echo(f"Wrote {zip_path}")
 
-    if dry_run and pending:
+    if unreadable and not dry_run:
+        sys.exit(EXIT_ERROR)
+    if dry_run and (pending or unreadable):
         sys.exit(EXIT_DRIFT)
 
 
+def _combo_visuals(report: Path, visual_types: tuple[str, ...]) -> list[str]:
+    """The names of a report's visuals of the targeted types, in path order."""
+    names: list[str] = []
+    pages = report / "definition" / "pages"
+    if not pages.is_dir():
+        return names
+    for path in sorted(pages.rglob("visual.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if (data.get("visual") or {}).get("visualType") in visual_types:
+            names.append(path.parent.name)
+    return names
+
+
+def _result_line(change: VisualChange) -> str:
+    """The per-visual result line of a written visual."""
+    counts = dict((card, (before, after)) for card, before, after in change.counts)
+    dp_before, dp_after = counts.get("dataPoint", (0, 0))
+    lb_before, lb_after = counts.get("labels", (0, 0))
+    line = len(change.styled)
+    excluded = len(change.excluded)
+    entries = "entry" if change.bar_side == 1 else "entries"
+    return (f"  {change.path.parent.name}: dataPoint {dp_before} -> {dp_after}, "
+            f"labels {lb_before} -> {lb_after} ({line} line measures each; "
+            f"{excluded} columns-role measure(s) excluded; "
+            f"{change.bar_side} bar-side {entries} preserved)")
+
+
+def _dry_run_block(change: VisualChange) -> None:
+    """The per-visual block of a dry run."""
+    click.echo(f"  {change.path.parent.name}: WOULD CHANGE")
+    if change.column_side:
+        click.echo("    columns-role measure(s) kept OUT of the line set: "
+                   + ", ".join(change.column_side))
+    for rb in change.rebinds:
+        click.echo(f"    Y2 stale: {rb.entity!r}.{rb.old!r} -> "
+                   f"would rebind to {rb.new!r}")
+    counts = dict((card, (before, after)) for card, before, after in change.counts)
+    for card in ("dataPoint", "labels"):
+        before, after = counts.get(card, (0, 0))
+        if before != after:
+            click.echo(f"    objects.{card}[]: {before} -> {after} entries")
+
+
+def _expand_tables(names: tuple[str, ...], model: SemanticModel) -> tuple[str, ...]:
+    """Field-parameter table names with each shell-style pattern expanded.
+
+    A pattern matches the model's tables case-insensitively (in name order);
+    one that matches nothing adds nothing. Plain names are kept as given.
+    """
+    import fnmatch
+
+    out: list[str] = []
+    for name in names:
+        if any(ch in name for ch in "*?["):
+            matched = sorted(t for t in model.raw_by_table
+                             if fnmatch.fnmatchcase(t.lower(), name.lower()))
+        else:
+            matched = [name]
+        out += [t for t in matched if t not in out]
+    return tuple(out)
+
+
 # -- check ---------------------------------------------------------------------
+def _rule_help() -> str:
+    return ", ".join(rules())
+
+
+def _filtered_reports(path: Path, report_name: str | None, model_name: str | None,
+                      settings: Settings):
+    """Discover reports, then apply --report / --model-name / exclusions."""
+    discovery = discover_reports(path)
+    reports = list(discovery.reports)
+    filters = []
+    if report_name:
+        wanted = {report_name, f"{report_name}.Report"}
+        reports = [r for r in reports if r.name in wanted]
+        filters.append(f"--report {report_name!r}")
+    else:
+        if model_name:
+            reports = [r for r in reports if report_model_name(r) == model_name]
+            filters.append(f"--model-name {model_name!r}")
+        if not discovery.single:
+            excluded = set(settings.canvas.exclude_reports)
+            reports = [r for r in reports if r.name not in excluded]
+    return discovery, reports, filters
+
+
 @main.command("check")
 @click.argument(
     "path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=click.Path(path_type=Path),
 )
 @click.option(
     "--model",
@@ -417,6 +634,51 @@ def style(
     "resolved per report from its definition.pbir.",
 )
 @click.option(
+    "--rule",
+    "rule_slugs",
+    multiple=True,
+    metavar="SLUG",
+    help="Run this rule instead of the default 'integrity' checks "
+    "(repeatable). Rules: integrity, slicer-gates, slicer-mode-gates, "
+    "category-filter, theme, visual-position, y-combo, filter-panel, "
+    "format-selector, stale-placeholders, answer-bookmarks, bookmark-literals. "
+    "slicer-gates: Enforce the `f-Slicer > 0` visual-level gate on every "
+    "Report field-parameter slicer (foundation rule #1). Check: scan only; "
+    "exit 1 if any Report slicer lacks the gate. Fix: inject the gate into "
+    "every violating slicer in place. "
+    "slicer-mode-gates: Enforce the owner's slicer-gate convention across a "
+    "report. Dropdown slicer -> visual-level filter [f-Slicer] > 0. "
+    "Vertical-list slicer -> visual-level filter [f-All] > 0. "
+    "format-selector: Enforce the z-Selector Format='Format' report-level "
+    "filter across every Report report. Check: scan only; exit 1 if any "
+    "report lacks the filter. Fix: add or repair the filter on every report "
+    "under PATH. "
+    "stale-placeholders: pbi-plot-styler check --rule stale-placeholders "
+    "--fix — repoint a saved blank-dimension binding.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, dir_okay=False, path_type=Path),
+    default=None,
+    help=f"Config file (TOML) with the canvas sections. Default: "
+    f"./{DEFAULT_CONFIG_FILENAME} if present.",
+)
+@click.option(
+    "--report",
+    "report_name",
+    default=None,
+    help="Check only the report folder with this name (with or without the "
+    ".Report suffix). Overrides the excluded-reports list.",
+)
+@click.option(
+    "--model-name",
+    "model_name",
+    default=None,
+    help="Check only reports whose definition.pbir points at "
+    "<NAME>.SemanticModel.",
+)
+@click.option(
     "--json",
     "as_json",
     is_flag=True,
@@ -425,8 +687,27 @@ def style(
 @click.option(
     "--fix",
     is_flag=True,
-    help="Repair the fixable findings (BMK001, BMK002) in place with "
-    "surgical, verified text edits, then check again.",
+    help="Run the fixers of the selected rules (integrity: BMK001, BMK002), "
+    "then check again. Fixers write only the files that need a change.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="With --fix: print the diff of every change the fixers would make "
+    "and write nothing. Exits 1 when there is something to fix.",
+)
+@click.option(
+    "--summary",
+    is_flag=True,
+    help="Report compliance with the four foundation rules (slicer-gates, "
+    "category-filter, theme, filter-panel). Never fails.",
+)
+@click.option(
+    "--only-display-names",
+    "only_names",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="bookmark-literals: config json — check only bookmarks it names",
 )
 @click.option(
     "--baseline",
@@ -443,19 +724,52 @@ def style(
 def check(
     path: Path,
     model_dir: Path | None,
+    rule_slugs: tuple[str, ...],
+    config_path: Path | None,
+    report_name: str | None,
+    model_name: str | None,
     as_json: bool,
     fix: bool,
+    dry_run: bool,
+    summary: bool,
+    only_names: Path | None,
     baseline_path: Path | None,
     update_baseline: bool,
 ) -> None:
-    """Check the PBIP report(s) under PATH for integrity problems.
+    """Check the PBIP report(s) under PATH.
 
-    Read-only unless --fix is given. Checks that field bindings resolve in
-    the paired model, that bookmarks are importable and point at real
-    pages and visuals, that field-parameter slots are consistent, and that
-    the theme files exist. Exits 0 when there are no new errors, 1 when
-    there are, 2 on a setup problem.
+    Without --rule, runs the integrity checks: field bindings resolve in the
+    paired model, bookmarks are importable and point at real pages and
+    visuals, field-parameter slots are consistent, theme files exist. With
+    --rule SLUG, runs that convention rule instead. Read-only unless --fix
+    is given. Exits 0 when there are no new errors, 1 when there are, 2 on
+    a setup problem.
     """
+    registry = rules()
+    slugs = list(SUMMARY_RULES) if summary else list(dict.fromkeys(rule_slugs or ("integrity",)))
+    unknown = [s for s in slugs if s not in registry]
+    if unknown:
+        raise StylerError(
+            f"unknown rule(s) {', '.join(unknown)}. Valid rules: {_rule_help()}."
+        )
+    if not path.exists():
+        _abort(f"ERROR: {path.resolve()} does not exist")
+    if dry_run and not fix:
+        raise StylerError("--dry-run only applies to --fix: add --fix to preview the fixes.")
+    if config_path is None:
+        default_config = Path.cwd() / DEFAULT_CONFIG_FILENAME
+        if default_config.is_file():
+            config_path = default_config
+    elif not config_path.is_file():
+        raise StylerError(f"config file {config_path} does not exist. Check the --config path.")
+    try:
+        settings = load_settings(config_path)
+    except SettingsError as exc:
+        raise StylerError(str(exc)) from exc
+    configured_baseline = settings.answer_bookmarks.baseline
+    if baseline_path is None and configured_baseline and "answer-bookmarks" in slugs:
+        # [answer_bookmarks] baseline, relative to the config file
+        baseline_path = (config_path.parent if config_path else Path.cwd()) / configured_baseline
     if update_baseline and baseline_path is None:
         raise StylerError("--update-baseline needs --baseline FILE to write to.")
     accepted: set[tuple[str, str]] = set()
@@ -469,56 +783,189 @@ def check(
             accepted = load_baseline(baseline_path)
         except (ValueError, json.JSONDecodeError) as exc:
             raise StylerError(str(exc)) from exc
+    # a guard finding means nothing was checked: no baseline may accept it
+    accepted = {k for k in accepted if k[0] not in UNBASELINABLE}
 
-    discovery = _discover(path)
-    root = path if not discovery.single else path.parent
-    models: dict[Path, SemanticModel] = {}
-    notes: list[str] = []
-    fixed: list[tuple[Path, str]] = []
-    refused: list[tuple[Path, str]] = []
-    findings: list[Finding] = []
-
-    for report in discovery.reports:
-        model: SemanticModel | None = None
+    options: dict = {}
+    options["check_path"] = path
+    options["dry_run"] = "1" if dry_run else ""
+    try:
+        builder = load_builder_settings(config_path)
+        options["picker_labels"] = {vid: key for key, vid in builder.pickers.items()}
+    except BuildError:
+        pass
+    if only_names is not None:
         try:
-            resolved = (model_dir or resolve_model_dir(report)).resolve()
-            if resolved not in models:
-                models[resolved] = SemanticModel.load(resolved)
-            model = models[resolved]
-        except (FileNotFoundError, json.JSONDecodeError) as exc:
-            notes.append(
-                f"{report.relative_to(root).as_posix()}: binding checks "
-                f"skipped, no local semantic model ({exc})"
-            )
-        if fix:
-            done, bad = fix_report(report)
-            fixed += done
-            refused += bad
-        findings += check_report(report, root, model)
+            options["only_display_names"] = load_display_name_filter(only_names)
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise StylerError(str(exc)) from exc
 
+    discovery, reports, filters = _filtered_reports(path, report_name, model_name, settings)
+    for skipped, reason in discovery.skipped:
+        if not as_json:
+            click.echo(f"Skipped:  {skipped.relative_to(path).as_posix()} ({reason})", err=True)
+    if not reports and not filters:
+        # a bare sweep over a folder with no reports: nothing to check
+        message = f"no *.Report folders under {path}; nothing to check"
+        if as_json:
+            click.echo(json.dumps({"tool": "pbi-plot-styler", "version": __version__,
+                                   "rules": slugs, "reports": [], "findings": [],
+                                   "notes": [message], "exit_code": EXIT_OK}, indent=2))
+        else:
+            click.echo(message)
+        sys.exit(EXIT_OK)
+    if not reports:
+        named = f" matching {' and '.join(filters)}" if filters else ""
+        raise StylerError(
+            f"nothing matched: no *.Report folders{named} under {path}. Pass a "
+            f"PBIP report folder (one containing definition.pbir and "
+            f"definition/pages), or a folder that contains one or more of them."
+        )
+    root = path if not discovery.single else path.parent
+    report_labels = {r: r.relative_to(root).as_posix() for r in reports}
+    contexts, notes, model_findings = _load_models(reports, root, model_dir, settings, options)
+    fixed: list[tuple[Path, str]] = []
+    planned: list[tuple[Path, str]] = []
+    diffs: list[str] = []
+    refused: list[tuple[Path, str]] = []
+    fix_lines: list[str] = []
+    fix_summary_lines: list[str] = []
+    findings: list[Finding] = []
+    skipped_notes: list[str] = []
+    checked: dict[str, int] = {}
+    details: dict[str, dict[str, int]] = {}
+
+    def keep_notes(ctx: RuleContext) -> None:
+        skipped_notes.extend(n for n in ctx.skipped if n not in skipped_notes)
+
+    fixers: list = []
+    if fix:
+        fixers = [registry[s] for s in slugs if registry[s].fix is not None]
+        # Everything a fixer needs is checked for every report before any
+        # report is written, so a setup problem never leaves half a fix.
+        try:
+            for report in reports:
+                for rule in fixers:
+                    if rule.prepare is not None:
+                        rule.prepare(contexts[report]())
+        except RuleAbort as exc:
+            _abort(str(exc))
+        except RuleError as exc:
+            raise StylerError(f"{exc}. --fix stopped before writing: nothing was written.") from exc
+        if dry_run:
+            planned, diffs, refused = _plan_fixes(reports, root, fixers, contexts, keep_notes)
+            for report in reports:
+                for rule in fixers:
+                    if rule.render_fix is not None:
+                        fix_lines += rule.render_fix(contexts[report](), [])
+        else:
+            try:
+                for report in reports:
+                    for rule in fixers:
+                        ctx = contexts[report]()
+                        changes = rule.fix(ctx)
+                        fixed += changes
+                        if rule.render_fix is not None:
+                            fix_lines += rule.render_fix(ctx, changes)
+                        if not rule.replace_fix_lines:
+                            fix_lines += [
+                                f"fixed    {p.relative_to(root).as_posix()}: {d}"
+                                for p, d in changes
+                            ]
+                        refused += ctx.options.pop("refused", [])
+                        for path, message in ctx.options.pop("read_errors", []):
+                            click.echo(message, err=True)
+                        for message in ctx.options.pop("stderr_lines", []):
+                            click.echo(message, err=True)
+                        keep_notes(ctx)
+            except RuleAbort as exc:
+                _abort(str(exc))
+            except RuleError as exc:
+                raise StylerError(_partial_fix_message(exc, fixed, root)) from exc
+    for rule in fixers:
+        if rule.fix_summary is not None:
+            fix_summary_lines += rule.fix_summary(contexts)
+
+    for report in reports:
+        ctx = contexts[report]()
+        found: list[Finding] = sorted(model_findings.get(report, []),
+                                      key=lambda f: (f.file, f.check_id, f.subject))
+        try:
+            for slug in slugs:
+                before = len(ctx.findings)
+                registry[slug].check(ctx)
+                added = ctx.findings[before:]
+                if not registry[slug].ordered:
+                    added = sorted(added, key=lambda f: (f.file, f.check_id, f.subject))
+                found += added
+        except RuleAbort as exc:
+            _abort(str(exc))
+        except RuleError as exc:
+            raise StylerError(str(exc)) from exc
+        findings += found
+        keep_notes(ctx)
+        for slug, n in ctx.checked.items():
+            checked[slug] = checked.get(slug, 0) + n
+        for slug, counts in ctx.details.items():
+            total = details.setdefault(slug, {})
+            for what, n in counts.items():
+                if isinstance(n, bool):
+                    total[what] = n
+                elif isinstance(n, int):
+                    total[what] = total.get(what, 0) + n
+                elif isinstance(n, list):
+                    total.setdefault(what, []).extend(n)
+                else:
+                    total[what] = n
+
+    if "bookmark-literals" in slugs and "bookmark-literals" not in checked:
+        raise StylerError(
+            "bookmark-literals judged no report: it needs the paired semantic model "
+            "(definition.pbir next to a local *.SemanticModel); pass --model "
+            "<*.SemanticModel folder>")
     current = {f.key for f in findings}
     new = [f for f in findings if f.key not in accepted]
-    healed = sorted(accepted - current)
+    in_scope = _baseline_scope(registry, slugs, report_labels.values())
+    healed = sorted(k for k in accepted - current if in_scope(k))
+    guards = [f for f in findings if f.check_id in UNBASELINABLE]
     if update_baseline:
-        write_baseline(baseline_path, findings)
+        kept = []
+        if baseline_path.is_file():
+            try:
+                kept = [k for k in load_baseline(baseline_path)
+                        if not in_scope(k) and k[0] not in UNBASELINABLE]
+            except (ValueError, json.JSONDecodeError) as exc:
+                raise StylerError(str(exc)) from exc
+        write_baseline(baseline_path, [f for f in findings if f.check_id not in UNBASELINABLE],
+                       keep=kept)
     new_errors = [f for f in new if f.severity == "error"]
-    exit_code = EXIT_OK if update_baseline or not new_errors else EXIT_DRIFT
+    failing = (bool(new_errors) and not update_baseline or bool(guards)) and not summary
+    exit_code = EXIT_DRIFT if failing or (dry_run and planned) else EXIT_OK
+    compliance = _compliance(registry, findings, checked) if summary else None
 
     if as_json:
         payload = {
             "tool": "pbi-plot-styler",
             "version": __version__,
-            "reports": [r.relative_to(root).as_posix() for r in discovery.reports],
+            "rules": slugs,
+            "reports": [r.relative_to(root).as_posix() for r in reports],
             "findings": [
-                {**f.to_dict(), "baselined": f.key in accepted} for f in findings
+                {**f.to_dict(), "baselined": f.key in accepted,
+                 **({"fix": fix_hint(f.check_id)} if summary else {})}
+                for f in findings
             ],
+            "checked": details,
             "healed": [{"id": i, "location": loc} for i, loc in healed],
             "fixed": [
                 {"file": p.relative_to(root).as_posix(), "change": d} for p, d in fixed
             ],
+            "planned": [
+                {"file": p.relative_to(root).as_posix(), "change": d} for p, d in planned
+            ],
             "refused": [
                 {"file": p.relative_to(root).as_posix(), "reason": r} for p, r in refused
             ],
+            "skipped": skipped_notes,
             "notes": notes,
             "summary": {
                 "errors": sum(f.severity == "error" for f in findings),
@@ -529,37 +976,600 @@ def check(
             },
             "exit_code": exit_code,
         }
+        if compliance is not None:
+            payload["compliance"] = compliance
         click.echo(json.dumps(payload, indent=2))
     else:
         for note in notes:
             click.echo(f"note: {note}", err=True)
-        for p, d in fixed:
-            click.echo(f"fixed    {p.relative_to(root).as_posix()}: {d}")
+        for note in skipped_notes:
+            if "stale-placeholders:" not in note:
+                click.echo(f"skipped  {note}")
+        for line in fix_lines:
+            click.echo(line)
+        for p, d in planned:
+            click.echo(f"would fix {p.relative_to(root).as_posix()}: {d}")
+        for diff in diffs:
+            click.echo(diff, nl=False)
         for p, r in refused:
             click.echo(f"REFUSED  {p.relative_to(root).as_posix()}: {r}")
-        for f in new:
-            click.echo(f"{f.severity.upper():<8} {f.check_id}  {f.file}: {f.message}")
+        for line in _finding_lines(registry, slugs, new, details, settings, path, fix,
+                                   summary):
+            click.echo(line)
+        for line in fix_summary_lines:
+            click.echo(line)
+        by_id: dict[str, list[str]] = {}
         for check_id, location in healed:
-            click.echo(f"healed   {check_id}  {location}")
+            by_id.setdefault(check_id, []).append(location)
+        for check_id, locations in by_id.items():
+            click.echo(f"{check_id}: {len(locations)} accepted finding(s) no longer occur — "
+                       f"re-capture the baseline (pbi-plot-styler check --update-baseline) "
+                       f"to lock it in: {sorted(locations)}")
+        if compliance is not None:
+            click.echo(_compliance_text(compliance, findings))
         errors = sum(f.severity == "error" for f in new)
         warnings = len(new) - errors
-        summary = (
-            f"\nChecked {len(discovery.reports)} report(s): {errors} error(s), "
+        text = (
+            f"\nChecked {len(reports)} report(s): {errors} error(s), "
             f"{warnings} warning(s)"
         )
         if accepted:
-            summary += (
+            text += (
                 f", {len(findings) - len(new)} accepted by the baseline, "
                 f"{len(healed)} healed"
             )
-        click.echo(summary + ".")
+        click.echo(text + ".")
         if update_baseline:
-            click.echo(f"Wrote {len(current)} finding(s) to {baseline_path}.")
+            written = len(current) - len({f.key for f in guards})
+            click.echo(f"Wrote {written} finding(s) to {baseline_path}.")
+            if guards:
+                click.echo(f"{guards[0].check_id} is never written to a baseline: "
+                           f"{guards[0].message}")
 
     sys.exit(exit_code)
 
 
-__all__ = ["main", "style", "check", "CHECKS"]
+def _framing(f: Finding) -> str:
+    return f"{f.severity.upper():<8} {f.check_id}  {f.file}: {f.message}"
+
+
+def _finding_lines(registry, slugs, new: list[Finding], details: dict,
+                   settings: Settings, check_path: Path | None = None,
+                   fixing: bool = False, summary: bool = False) -> list[str]:
+    """The text lines of the new findings, grouped per rule in run order.
+
+    A rule with its own ``render`` adds its header and summary lines; any
+    other rule prints its findings, with guidance for ids that have it.
+    """
+    from .rules import guided_lines
+
+    values = {
+        "fingerprints": ", ".join(settings.answer_bookmarks.inherited_fingerprints)
+        or "inherited fingerprints",
+        "dropdowns": "/".join(settings.panel.filter_tables[:1] + tuple(
+            t.rsplit(" ", 1)[-1] for t in settings.panel.filter_tables[1:])),
+        "slot_table": settings.placeholders.template_slot_table,
+        "check_path": str(check_path.resolve()) if check_path else "",
+        "check_folder": check_path.name if check_path else "",
+        "fixing": "1" if fixing else "",
+        "summary": "1" if summary else "",
+    }
+    owner: dict[int, str] = {}
+    for f in new:
+        for slug in slugs:
+            if f.check_id in registry[slug].ids:
+                owner[id(f)] = slug
+                break
+    lines = [_framing(f) for f in new if id(f) not in owner]
+    for slug in slugs:
+        mine = [f for f in new if owner.get(id(f)) == slug]
+        render = registry[slug].render
+        if render is not None:
+            lines += render(mine, details.get(slug, {}), _framing, values)
+        else:
+            lines += guided_lines(mine, _framing, values)
+    return lines
+
+
+def _load_models(reports, root: Path, model_dir: Path | None, settings: Settings,
+                 options: dict):
+    """One context factory per report, the notes, and MDL001 per report.
+
+    A report with no local model reference is only a note. A model that is
+    referenced but cannot be loaded is an ``MDL001`` error: the rules that
+    need it are skipped, and their notes say why.
+    """
+    loaded: dict[Path, SemanticModel | Exception] = {}
+    contexts = {}
+    notes: list[str] = []
+    model_findings: dict[Path, list[Finding]] = {}
+    for report in reports:
+        label = report.relative_to(root).as_posix()
+        model: SemanticModel | None = None
+        error: str | None = None
+        try:
+            resolved = (model_dir or resolve_model_dir(report)).resolve()
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            notes.append(f"{label}: binding checks skipped, no local semantic model ({exc})")
+            resolved = None
+        if resolved is not None and not resolved.is_dir():
+            notes.append(f"{label}: binding checks skipped, no local semantic model "
+                         f"({resolved.name} is not a folder next to the report)")
+            resolved = None
+        if resolved is not None:
+            if resolved not in loaded:
+                try:
+                    loaded[resolved] = SemanticModel.load(resolved)
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    loaded[resolved] = exc
+            outcome = loaded[resolved]
+            if isinstance(outcome, Exception):
+                error = str(outcome) or type(outcome).__name__
+                source = report / "definition.pbir" if model_dir is None else resolved
+                where = (source.relative_to(root).as_posix()
+                         if source.is_relative_to(root) else source.as_posix())
+                model_findings[report] = [Finding(
+                    "MDL001", where, resolved.name,
+                    f"the semantic model {resolved.name} cannot be loaded: {error}")]
+            else:
+                model = outcome
+
+        def factory(report=report, model=model, error=error) -> RuleContext:
+            return RuleContext(report, root, model, settings=settings, options=options,
+                               model_error=error)
+        contexts[report] = factory
+    return contexts, notes, model_findings
+
+
+def _plan_fixes(reports, root: Path, fixers, contexts, keep_notes):
+    """Run the fixers on a scratch copy of each report: what would change.
+
+    Returns ``(planned, diffs, refused)``; nothing under ``root`` is written.
+    """
+    import difflib
+    import shutil
+    import tempfile
+
+    planned: list[tuple[Path, str]] = []
+    diffs: list[str] = []
+    refused: list[tuple[Path, str]] = []
+    with tempfile.TemporaryDirectory() as scratch:
+        for report in reports:
+            rel = report.relative_to(root)
+            copy = Path(scratch) / rel
+            shutil.copytree(report, copy)
+            before = {p.relative_to(copy): p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+            real = contexts[report]()
+            for rule in fixers:
+                ctx = RuleContext(copy, Path(scratch), real.model, settings=real.settings,
+                                  options=real.options, model_error=real.model_error)
+                try:
+                    changes = rule.fix(ctx)
+                except RuleError as exc:
+                    raise StylerError(f"{exc}. Dry run: nothing was written.") from exc
+                planned += [(root / p.relative_to(scratch), d) for p, d in changes]
+                refused += [(root / p.relative_to(scratch), r)
+                            for p, r in ctx.options.pop("refused", [])]
+                keep_notes(ctx)
+            after = {p.relative_to(copy): p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+            for name in sorted(set(before) | set(after)):
+                old, new = before.get(name, b""), after.get(name, b"")
+                if old == new:
+                    continue
+                shown = (rel / name).as_posix()
+                diffs.append("".join(difflib.unified_diff(
+                    old.decode("utf-8-sig").splitlines(keepends=True),
+                    new.decode("utf-8-sig").splitlines(keepends=True),
+                    fromfile=f"a/{shown}" if name in before else "/dev/null",
+                    tofile=f"b/{shown}" if name in after else "/dev/null")))
+    return planned, diffs, refused
+
+
+def _partial_fix_message(exc: Exception, fixed, root: Path) -> str:
+    """The error for a fixer that failed after others had written."""
+    if not fixed:
+        return f"{exc}. --fix stopped: nothing was written."
+    lines = [f"{exc}. --fix stopped; these changes were already written:"]
+    lines += [f"  {p.relative_to(root).as_posix()}: {d}" for p, d in fixed]
+    return "\n".join(lines)
+
+
+def _baseline_scope(registry, slugs, report_labels):
+    """Whether a baseline entry belongs to this run (and is rewritten by it)."""
+    ids = {"MDL001"}
+    for slug in slugs:
+        ids.update(registry[slug].ids)
+    prefixes = tuple(f"{label}/" for label in report_labels)
+
+    def in_scope(entry: tuple[str, str]) -> bool:
+        check_id, location = entry
+        return check_id in ids and location.startswith(prefixes)
+    return in_scope
+
+
+def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> dict:
+    """Per-rule compliance for the foundation rules (``--summary``)."""
+    rows = []
+    for slug in SUMMARY_RULES:
+        rule = registry[slug]
+        own = [f for f in findings if f.check_id in rule.summarised]
+        critical = [f for f in own if f.check_id in rule.critical and f.severity == "error"]
+        total = checked.get(slug, 0)
+        # the passed count is over the components the original judged: a
+        # bookmark capture never counts against a visual
+        failing = len({f.location for f in critical if f.check_id not in _CAPTURE_ONLY})
+        rows.append({
+            "rule": slug,
+            "title": rule.title,
+            "number": RULE_REPORT[slug][0],
+            "report_name": RULE_REPORT[slug][1],
+            "checked": total,
+            "passed": max(total - failing, 0),
+            # any error finding of the rule breaks compliance, not only the
+            # critical ids (those still decide the passed count)
+            "compliant": not any(f.severity == "error" for f in own),
+            "errors": sum(f.severity == "error" for f in own),
+            "warnings": sum(f.severity == "warning" for f in own),
+            "findings": [_compliance_finding(f) for f in own],
+        })
+    compliant = sum(r["compliant"] for r in rows)
+    return {
+        "total_rules": len(rows),
+        "compliant_rules": compliant,
+        "compliance_percentage": round(100.0 * compliant / len(rows), 1),
+        "critical_violations": sum(r["errors"] for r in rows),
+        "warning_violations": sum(r["warnings"] for r in rows),
+        "info_violations": 0,
+        "overall_compliance": compliant == len(rows)
+        and not any(r["errors"] for r in rows),
+        "rules": rows,
+    }
+
+
+#: ids whose findings are a capture, not a component the rule judged.
+_CAPTURE_ONLY = frozenset({"GAT002"})
+
+
+def _compliance_finding(finding: Finding) -> dict:
+    """One finding of the compliance report: its type, text and fix."""
+    kind, description, component = finding_type(finding.check_id)
+    if description is None and kind is None:
+        description = finding.message
+    elif description is None:
+        description = finding.message.split(" (Expected:", 1)[0]
+    if component is None:
+        component = finding.subject
+    return {
+        "id": finding.check_id,
+        "subject": finding.subject,
+        "severity": finding.severity,
+        "type": kind,
+        "description": description,
+        "component": component,
+        "fix": fix_hint(finding.check_id),
+    }
+
+
+def _compliance_text(compliance: dict, findings: list[Finding]) -> str:
+    """The compliance report of the four foundation rules."""
+    _force_utf8()
+    total = compliance["total_rules"]
+    compliant = compliance["compliant_rules"]
+    score = compliance["compliance_percentage"]
+    critical = compliance["critical_violations"]
+    warnings = compliance["warning_violations"]
+    lines = [
+        "",
+        "\U0001F50D Template Foundation Rules Comprehensive Report:",
+        "=" * 60,
+        "# Template Foundation Rules Validation Report",
+        "",
+        f"**Overall Compliance**: {score}% ({compliant}/{total} rules)",
+        f"**Violations**: {critical} critical, {warnings} warnings",
+        "",
+    ]
+    for row in compliance["rules"]:
+        mark = "✅ PASS" if row["compliant"] else "❌ FAIL"
+        lines.append(f"## Rule #{row['number']}: {row['report_name']} {mark}")
+        lines.append(f"Components: {row['passed']}/{row['checked']} passed")
+        lines.append("")
+        for item in row["findings"]:
+            icon = "\U0001F534" if item["severity"] == "error" else "⚠️"
+            kind = item["type"] or item["id"]
+            lines.append(f"**{icon} {kind}** ({item['component']})")
+            lines.append(f"- {item['description']}")
+            if item["fix"]:
+                lines.append(f"- **Fix**: {item['fix']}")
+            lines.append("")
+    lines.append("")
+    lines.append("\U0001F4CA Summary:")
+    lines.append(f"   Overall Compliance: {compliance['overall_compliance']}")
+    lines.append(f"   Rules Passed: {compliant}/{total}")
+    lines.append(f"   Compliance Score: {score}%")
+    lines.append(f"   Critical Issues: {critical}")
+    lines.append(f"   Warnings: {warnings}")
+    return "\n".join(lines)
+
+
+def _force_utf8() -> None:
+    """Let the report's marks print on a console that is not UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (OSError, ValueError):
+                pass
+
+
+# -- colors ----------------------------------------------------------------------
+#: ``colors`` exit codes: 0 done or nothing to do, 1 a dry run found changes,
+#: 2 usage error (bad option, unreadable model, unparsable palette).
+EXIT_COLORS_PENDING = 1
+EXIT_INVALID = 2
+
+
+@main.group("colors")
+def colors() -> None:
+    """Synchronize measure colours across field-parameter columns and tables."""
+
+
+def _color_options(func):
+    func = click.option("--report", "report_dir", required=True,
+                        type=click.Path(exists=True, file_okay=False, path_type=Path),
+                        help="The *.Report folder.")(func)
+    func = click.option("--model", "model_dir", default=None,
+                        type=click.Path(exists=True, file_okay=False, path_type=Path),
+                        help="The *.SemanticModel folder. Default: from definition.pbir.")(func)
+    func = click.option("--apply", is_flag=True,
+                        help="Write the changes. Without it nothing is written.")(func)
+    func = click.option("--measure", default="c-Measure Color", show_default=True,
+                        help="The palette measure.")(func)
+    func = click.option("--palette-table", default="w-Colors", show_default=True,
+                        help="The table searched first for the palette measure.")(func)
+    func = click.option("--default-color-id", type=int, default=9, show_default=True,
+                        help="ThemeDataColor ColorId used by reset (default: 9)")(func)
+    return func
+
+
+def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
+                opts: ColorOptions) -> None:
+    try:
+        model = model_dir or resolve_model_dir(report_dir)
+        result = action(report_dir, model, opts, apply)
+    except (PaletteError, FileNotFoundError, json.JSONDecodeError) as exc:
+        click.echo(f"FAIL: {exc}", err=True)
+        sys.exit(EXIT_INVALID)
+    for line in result.header:
+        click.echo(line)
+    for line in result.listing:
+        click.echo(line)
+    for line in result.unsupported:
+        click.echo(line)
+    for line in result.collisions:
+        click.echo(line)
+    for line in result.unregistered:
+        click.echo(line)
+    if action is color_sync:
+        verb = "wrote" if apply else "would write"
+        click.echo(f"{verb} {len(result.changed)} file(s): "
+                   f"{result.rewritten} colour entry/entries rewritten, "
+                   f"{result.added} added")
+        for path in _sorted_changed(result.changed):
+            click.echo(f"   {_shown_path(report_dir, path)}")
+        if not apply and result.changed:
+            click.echo("")
+            click.echo("(dry run -- pass --apply to write)")
+    else:
+        verb = "restored" if apply else "would restore"
+        click.echo(f"{verb} {result.restored} colour entry/entries in "
+                   f"{len(result.changed)} file(s)")
+        for path in _sorted_changed(result.changed):
+            click.echo(f"   {_shown_path(report_dir, path)}")
+        if not apply and result.changed:
+            click.echo("")
+            click.echo("(dry run -- pass --apply to write)")
+    pending = bool(result.changes) and not apply
+    sys.exit(EXIT_COLORS_PENDING if pending else EXIT_OK)
+
+
+def _sorted_changed(paths: list[Path]) -> list[Path]:
+    """The changed files: the visual files first, then the bookmark files,
+    each in name order."""
+    visuals = sorted((p for p in paths if p.suffix == ".json"
+                      and "bookmark" not in p.name),
+                     key=lambda p: p.as_posix())
+    bookmarks = sorted((p for p in paths if p not in visuals),
+                       key=lambda p: p.as_posix())
+    return visuals + bookmarks
+
+
+def _shown_path(report_dir: Path, path: Path) -> str:
+    """The path as the user sees it: the report folder as it was given,
+    joined with the file's path inside the report."""
+    try:
+        return (report_dir / path.relative_to(report_dir)).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+@colors.command("sync")
+@_color_options
+@click.option("--visual-type", "visual_types", multiple=True,
+              help="limit changes to these visual types, e.g. pivotTable")
+@click.option("--min-series", type=int, default=2, show_default=True,
+              help="only report bookmarks pinning at least this many bars")
+@click.option("--all-visuals", is_flag=True,
+              help="include every chart/table, beyond picker matrices and bookmarked multi-series charts")
+def colors_sync(report_dir, model_dir, apply, measure, palette_table, default_color_id,
+                visual_types, min_series, all_visuals) -> None:
+    """Synchronize measure colours across field-parameter columns and tables.
+
+    USE THIS WHEN measure colours drifted across visuals or a new measure was
+    registered — "re-stamp bar colours from c-Measure Color". Run
+    `pbi-plot-styler style` after it.
+
+    Read the picker and palette from [c-Measure Color] in w-Colors.tmdl. Stamp
+    identity-keyed column-series fills and matrix value/header colours
+    for every registered measure, including measures selected by future bookmarks.
+    Process bookmark formatting overrides as well as base visual formatting.
+
+    Default scope: all matrices using the palette's picker in a value role, plus
+    charts with bookmarked multi-measure selections. --all-visuals includes every
+    supported chart/table. Other visual types are outside this command's current scope.
+
+    Exits 0 when the changes were written or none are needed, 1 when a dry
+    run found changes to make, 2 on invalid input.
+    """
+    opts = ColorOptions(measure=measure, host_table=palette_table,
+                        default_color_id=default_color_id,
+                        visual_types=tuple(visual_types) or ColorOptions().visual_types,
+                        min_series=min_series, all_visuals=all_visuals,
+                        filter_types=bool(visual_types))
+    _run_colors(color_sync, report_dir, model_dir, apply, opts)
+
+
+@colors.command("reset")
+@_color_options
+@click.option("--visual-type", "visual_types", multiple=True,
+              help="Visual type to revert (repeatable), on visuals and bookmark "
+              "captures. Default: bar, line, combo charts and matrices.")
+def colors_reset(report_dir, model_dir, apply, measure, palette_table,
+                 default_color_id, visual_types) -> None:
+    """Revert palette colours written by sync (dry run unless --apply).
+
+    undo this command's literal colours: restore chart series to the report theme and remove matrix overrides
+    """
+    opts = ColorOptions(measure=measure, host_table=palette_table,
+                        default_color_id=default_color_id,
+                        visual_types=tuple(visual_types) or ColorOptions().visual_types,
+                        filter_types=bool(visual_types))
+    _run_colors(color_reset, report_dir, model_dir, apply, opts)
+
+
+# -- rename-label ----------------------------------------------------------------
+@main.command("rename-label")
+@click.argument("client_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--pair", "pairs", nargs=2, multiple=True, required=True,
+              metavar="OLD NEW", help="Old and new row label (repeatable).")
+@click.option("--table-pattern", "patterns", multiple=True,
+              help="Selector tables to edit (glob, repeatable). Default: x-*.")
+@click.option("--apply", is_flag=True, help="Write the changes.")
+def rename_label(client_dir: Path, pairs, patterns, apply: bool) -> None:
+    """Rename a field-parameter row label in the model and every report.
+
+    Edits the selector tables of every *.SemanticModel directly under
+    CLIENT_DIR and the visuals, pages and bookmarks of every *.Report below
+    it. Only the quoted label ("OLD") is replaced. Dry run unless --apply.
+    """
+    try:
+        result = rename_labels(client_dir, [tuple(p) for p in pairs], apply=apply,
+                               patterns=tuple(patterns) or ("x-*",))
+    except LabelRenameError as exc:
+        raise StylerError(str(exc)) from exc
+    width = max(len(str(count)) for _, _, count in result.counts)
+    for old, new, count in result.counts:
+        click.echo(f'  {count:>{width}}  "{old}" -> "{new}"')
+    click.echo()
+    verb = "APPLIED" if apply else "DRY RUN"
+    click.echo(f"{verb}: {len(result.touched)} file(s)")
+    for path in result.touched:
+        click.echo(f"    {path.relative_to(client_dir).as_posix()}")
+
+
+# -- rename-measure ----------------------------------------------------------------
+@main.command("rename-measure")
+@click.argument("old")
+@click.argument("new")
+@click.option("--model", "model_dir", required=True,
+              type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="The *.SemanticModel folder; every *.Report below its parent "
+              "folder (at any depth) is a report root.")
+@click.option("--label-from", default=None, help="Old label (default: OLD).")
+@click.option("--label-to", default=None, help="New label (default: NEW).")
+@click.option("--dry-run", is_flag=True, help="Count the references; write nothing.")
+def rename_measure_cmd(old: str, new: str, model_dir: Path, label_from, label_to,
+                       dry_run: bool) -> None:
+    """Rename measure OLD to NEW in every visual and bookmark of the reports.
+
+    The model side (the measure declaration and DAX) is not edited. The
+    dry-run count equals the number of rewrites a real run makes.
+    """
+    roots = report_roots(model_dir)
+    if dry_run:
+        total = count_measure_refs(roots, old, label_from)
+        click.echo(f"DRY RUN: {total} reference(s) to [{old}] in {len(roots)} report(s).")
+        return
+
+    def report_file(path: Path, hits: int) -> None:
+        click.echo(f"  {path.relative_to(model_dir.parent).as_posix()}: {hits}")
+
+    total = rename_measure(roots, old, new, label_from, label_to, on_file=report_file)
+    click.echo(f"APPLIED: {total} reference(s) renamed to [{new}] in {len(roots)} report(s).")
+
+
+# -- bookmarks build --------------------------------------------------------------
+@main.group("bookmarks")
+def bookmarks() -> None:
+    """Build answer bookmarks from a working base bookmark."""
+
+
+@bookmarks.command("build")
+@click.argument("entries", required=False,
+                type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--report", "report_dir", required=True,
+              type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="report dir")
+@click.option("--config", "config_path", default=None,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help=f"Config file with a [bookmarks] section. Default: "
+              f"./{DEFAULT_CONFIG_FILENAME} if present.")
+@click.option("--base", default=None,
+              help="bookmark id to clone as the base state (default [bookmarks] base; "
+              "prefer a bookmark PROVEN to work in the target report)")
+@click.option("--group", default=None, help="bookmark group name to register under")
+@click.option("--keep-ids", is_flag=True,
+              help="Re-render: an existing bookmark with the entry's display name "
+              "is the base and keeps its name; new ones go first in the group.")
+@click.option("--legacy-layout", is_flag=True,
+              help="Single-page layout: the measures picker fills the matrix "
+              "values (3 or more) and unused pickers are emptied.")
+@click.option("--dry-run", is_flag=True, help="Build everything, write nothing.")
+@click.option("--self-test", is_flag=True,
+              help="Build one synthetic entry from the base bookmark in memory, check "
+              "it and print self-test PASS; nothing is written.")
+def bookmarks_build(entries: Path | None, report_dir: Path, config_path: Path | None,
+                    base: str | None, group: str | None, keep_ids: bool,
+                    legacy_layout: bool, dry_run: bool, self_test: bool) -> None:
+    """Render one bookmark per entry of ENTRIES (a JSON list) into the report."""
+    if config_path is None and (Path.cwd() / DEFAULT_CONFIG_FILENAME).is_file():
+        config_path = Path.cwd() / DEFAULT_CONFIG_FILENAME
+    try:
+        settings = load_builder_settings(config_path)
+        if self_test:
+            for line in builder_self_test(report_dir, settings, base=base,
+                                          legacy=legacy_layout):
+                click.echo(line)
+            return
+        if entries is None:
+            raise StylerError("Missing argument 'ENTRIES' (a JSON list of entries).")
+        result = build_bookmarks(report_dir, entries, settings, base=base, group=group,
+                                 keep_ids=keep_ids, legacy=legacy_layout, dry_run=dry_run)
+    except BuildError as exc:
+        raise StylerError(str(exc)) from exc
+    for note in result.notes:
+        click.echo(f"note: {note}", err=True)
+    for path, display, kept in result.details:
+        name = path.name[: -len(".bookmark.json")]
+        if keep_ids:
+            click.echo(f"kept {name} {display}" if kept else f"NEW  {name} {display}")
+        elif dry_run:
+            click.echo(f"would write {path.resolve()}")
+        else:
+            click.echo(str(path.resolve()))
+
+
+__all__ = ["main", "style", "check", "colors", "bookmarks", "CHECKS"]
 
 if __name__ == "__main__":  # pragma: no cover
     main()

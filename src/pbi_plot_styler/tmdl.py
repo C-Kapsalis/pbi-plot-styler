@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from .textio import read_text
 
 # `table <name>` at the top of a .tmdl file. Single-quoted names may embed
 # doubled quotes; bare names run to end of line.
@@ -35,7 +36,7 @@ _MEASURE_DECL = re.compile(
 _NAMEOF_REF = re.compile(
     r"NAMEOF\s*\(\s*"
     r"(?:'((?:[^'\n]|'')+)'|([A-Za-z_][^'\"\[\]\n(),]*?))?"  # optional table
-    r"\s*\[([^\]\n]+)\]\s*\)",
+    r"\s*\[((?:[^\]\n]|\]\])+)\]\s*\)",
     re.IGNORECASE,
 )
 
@@ -115,6 +116,21 @@ class CatalogEntry:
     position: int
 
 
+@dataclass(frozen=True)
+class NameofRef:
+    """One ``NAMEOF ( ... )`` argument in a table's DAX."""
+
+    #: The table qualifier as written, or ``None`` for a bare ``[Name]``.
+    qualifier: str | None
+    #: The bracketed name.
+    name: str
+    #: Whether the closing parenthesis is followed by a comma (a tuple
+    #: member of a field-parameter row, not a trailing reference).
+    in_tuple: bool
+    #: The row's sort ordinal (the number after the reference), if any.
+    ordinal: float | None = None
+
+
 @dataclass
 class SemanticModel:
     """A parsed view of a PBIP semantic model's ``definition/tables``."""
@@ -154,7 +170,7 @@ class SemanticModel:
 
         model = cls(definition_dir=definition)
         for tmdl_file in sorted(tables_dir.glob("*.tmdl")):
-            content = tmdl_file.read_text(encoding="utf-8")
+            content = read_text(tmdl_file)
             match = _TABLE_DECL.search(content)
             table_name = (
                 _unquote(match.group(1), match.group(2), match.group(3))
@@ -251,6 +267,48 @@ class SemanticModel:
                 if rest_lower.startswith(column.lower() + "."):
                     return True
         return False
+
+    def nameof_refs(self, table: str) -> list[NameofRef]:
+        """Every ``NAMEOF`` argument in ``table``'s TMDL, comments ignored."""
+        real = self.table_named(table)
+        if real is None:
+            return []
+        source = strip_dax_comments(self.raw_by_table[real])
+        refs: list[NameofRef] = []
+        for ref in _NAMEOF_REF.finditer(source):
+            qualifier = _unquote(ref.group(1), ref.group(2), None) or None
+            in_tuple = bool(re.compile(r"\s*,").match(source, ref.end()))
+            ordinal = _ORDINAL_AFTER.match(source, ref.end())
+            refs.append(NameofRef(
+                qualifier, ref.group(3).replace("]]", "]").strip(), in_tuple,
+                float(ordinal.group(1)) if ordinal else None,
+            ))
+        return refs
+
+    def declaring_table(self, measure: str) -> str | None:
+        """The first table (file order) that declares ``measure``."""
+        return self.home_table(measure)
+
+    def unparsed_nameofs(self, table: str) -> list[str]:
+        """The text of every ``NAMEOF`` the parser could not read.
+
+        Only the ones that are a tuple member (a comma follows) count: a
+        NAMEOF outside a field-parameter row is not a field-parameter row.
+        """
+        real = self.table_named(table)
+        if real is None:
+            return []
+        source = strip_dax_comments(self.raw_by_table[real])
+        spans = [m.span() for m in _NAMEOF_REF.finditer(source)]
+        out: list[str] = []
+        for match in re.finditer(r"NAMEOF\b", source, re.IGNORECASE):
+            if any(start <= match.start() < end for start, end in spans):
+                continue
+            end = source.find(")", match.end())
+            stop = end + 1 if end != -1 else len(source)
+            if re.compile(r"\s*,").match(source, stop):
+                out.append(source[match.start(): stop])
+        return out
 
     # -- field-parameter scan -------------------------------------------------
     def parameter_catalog(self, table: str) -> list[CatalogEntry]:

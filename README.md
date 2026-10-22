@@ -154,17 +154,27 @@ pbi-plot-styler "Roastery.Report"
 ```
 Model:    .../Roastery.SemanticModel
 Measures: 5 drive the styling
-  styled definition/pages/monthlyperformance/visuals/combo01/visual.json
-  styled definition/pages/seasonaltrends/visuals/combo02/visual.json
+  styled definition/pages/monthlyperformance/visuals/combo01/visual.json: dataPoint 0 -> 5, labels 0 -> 6
+  styled definition/pages/seasonaltrends/visuals/combo02/visual.json: dataPoint 0 -> 5, labels 0 -> 6
 
 Restyled 2/2 visual(s); 0 already styled.
+Totals: 0 rebind(s), 0 skipped.
 ```
+
+Each styled line gives the entry counts before and after and, with
+`--exclude-role`, the column-side measures left unstyled.
 
 Run it again and it reports `Restyled 0/2 visual(s); 2 already styled`, the
 command is safe to run after every model change, mechanically.
 
 `REPORT_DIR` can also be any folder that contains one or more `*.Report`
 folders, at any depth: every report found is styled against its own model.
+In such a sweep (without `--model`), a report whose model cannot be resolved
+or loaded, or whose model styles no measure, is skipped with a `Skipped:`
+line and counted in the totals; the other reports are styled as usual. A
+single named report, or a run with `--model`, still stops with exit `2`.
+`REPORT_DIR` may also be a page folder or a `visual.json` inside a report:
+only the visuals under that path are restyled.
 
 ```bash
 pbi-plot-styler path/to/workspace --dry-run
@@ -208,7 +218,7 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 
 | TOML key | CLI flag | Default | Controls |
 |---|---|---|---|
-| `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling. Restrict this to just the table that feeds your line to style only the line; if that table's measure catalog overlaps with the columns' table, also set `exclude_current_roles` below. |
+| `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling. A shell-style pattern such as `x-*` matches the model's tables case-insensitively; one that matches nothing adds nothing. Restrict this to just the table that feeds your line to style only the line; if that table's measure catalog overlaps with the columns' table, also set `exclude_current_roles` below. |
 | `tables.renames` | `--rename-table OLD=NEW` (repeatable) | none | Renames one table in the list above, leaving the other default names in place |
 | `targets.visual_types` | `--visual-type` (repeatable) | `lineClusteredColumnComboChart`, `lineStackedColumnComboChart` | Which `visualType` values get restyled |
 | `targets.exclude_current_roles` | `--exclude-role NAME` (repeatable) | none | Query role (for example `Y`, Power BI's internal name for the columns) whose measures are excluded from styling, per visual: the measure bound to it, or, when the role is bound through a field parameter, every measure that parameter offers. Their existing formatting is kept. Re-reads the binding on every run. |
@@ -220,7 +230,12 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 | `style.label_color` | `--label-color` | `#252423` | Data-label text color |
 | `style.label_background` | `--label-background` | match line color | Data-label background per measure |
 | `style.label_transparency` | `--label-transparency` | `20` | Background transparency, 0 to 100. Seeded where a measure has none; enforced everywhere when set explicitly |
+| `style.label_transparency_seed` | `--seed-label-transparency` | unset | A transparency, 0 to 100, seeded only where a measure has none (never overwrites); cannot be combined with an explicit `label_transparency` |
 | `style.show_labels` | `--show-labels` / `--hide-labels` | `true` | Data labels on/off. Seeded on visuals without label settings; enforced when set explicitly (likewise `label_color`) |
+| `style.label_default_properties` | - | `show`, `color`, `enableBackground` | The properties of the no-selector `labels` entry seeded on a visual that has none, as `name = "DAX literal"` pairs, for example `{enableTitleDataLabel = "true", titleContentType = "'Custom'", enableBackground = "true"}` |
+| `style.touch_existing_label_default` | - | `true` | `false` keeps an existing no-selector `labels` entry exactly as found (no `enableBackground` forced on) |
+| `targets.line_role` / `targets.column_role` | - | `Y2` / `Y` | The query roles drawn as the line and as the columns (used by `--rebind-stale-line`) |
+| - | `--rebind-stale-line` | off | Before styling, points a line measure the model no longer declares (for example `!Cost` after a rename to `Cost`) at the current measure. Leading symbols are stripped, then an exact name or a single case-insensitive match in the same table wins; anything else is left alone. With this flag the column role counts as column side unless `--exclude-role` is given. `--dry-run` prints a `would rebind` line per projection |
 | - | `--model DIR` | from `definition.pbir` | Semantic-model folder override |
 | - | `--config FILE` | `./plotstyler.toml` if present | Config file path |
 | - | `--dry-run` | off | Diff only; write nothing |
@@ -290,6 +305,57 @@ is not a local folder still gets every check except the binding checks.
 
 Run the check after a measure rename or a bookmark change; run the styler
 after a field-parameter change.
+
+### Canvas convention rules
+
+The integrity checks above are the default `integrity` rule. Reports built
+on the standard canvas (a matrix plus a line-and-stacked-column chart driven
+by selector slicers) can also be checked against its conventions, one rule at
+a time with `--rule SLUG` (repeatable):
+
+| Rule | Ids | Checks | `--fix` |
+|---|---|---|---|
+| `slicer-gates` | `GAT001`, `GAT002` | Every selector slicer on a visible canvas page, and every bookmark capture of one, has an active `[f-Slicer] > 0` filter | Writes the gate on the table that declares the measure |
+| `slicer-mode-gates` | `GAT003` to `GAT005` | Dropdown slicers gate on `f-Slicer`, list slicers on `f-All`, bound to the table that declares them; no gate reference names another table | Writes or repoints the gates |
+| `category-filter` | `CAT001` | Menu bookmarks set the analysis-category filter | - |
+| `theme` | `THM002` to `THM006` | A theme collection with a base and a custom theme, and no hex colour literals in `report.json` | - |
+| `visual-position` | `POS001` | Every visual has an x and y position | - |
+| `y-combo` | `YCG001`, `YCG002` | `y<N>_combo_group` naming and membership | - |
+| `filter-panel` | `PNL001`, `PNL002` | The filter slicers live in a master group named `y_filters_group` | Renames the detected group, its children's parent links and bookmark references |
+| `format-selector` | `FMT001` | A hidden, locked report filter selects the `Format` item of `z-Selector Format` (only when the model has that table) | Writes the canonical filter |
+| `stale-placeholders` | `PLH001` | Visuals and bookmarks bind the blank-dimension placeholder their y-axis selector actually offers | Repoints the placeholder |
+| `answer-bookmarks` | `ABK000` to `ABK010`, `PGW001`, `PGW002` | Whole-page answer bookmarks: scope, category, submenu, matrix capture, slot map, row filters, picker selections; raw measures in parameter wells and dead navigator targets on the main page | - |
+| `bookmark-literals` | `BML001`, `BML002` | Each saved picker selection is a row of the field parameter behind that slicer | - |
+
+```bash
+pbi-plot-styler check client/ --rule slicer-gates --rule theme
+pbi-plot-styler check client/ --rule slicer-gates --fix      # fix, then check again
+pbi-plot-styler check client/ --summary                      # foundation-rule compliance
+pbi-plot-styler check client/ --report Weekly --rule theme       # one named report
+```
+
+Table, measure and visual names come from optional sections of
+`plotstyler.toml` (`[canvas]`, `[gates]`, `[category]`, `[placeholders]`,
+`[panel]`, `[format_selector]`, `[answer_bookmarks]`) with generic defaults.
+A folder sweep skips the API-only report family (`M.Report`, `-M.Report`)
+unless it is named with `--report`; `--model-name NAME` keeps only reports
+bound to `NAME.SemanticModel`; a filter that matches nothing exits `2`.
+A rule that does not apply (no y-combo groups, an ambiguous placeholder, no
+paired model) is listed under `skipped` instead of passing silently. The
+rules, their settings and every id are described in
+[`docs/convention-rules.md`](docs/convention-rules.md).
+
+## More commands
+
+| Command | What it does |
+|---|---|
+| `colors sync --report R [--model M] [--apply]` | Stamps each measure's colour from the model's palette measure (`[c-Measure Color]`) on column series and matrix columns, including measures only a multi-series bookmark shows. Exit `0` changes, `2` none, `3` invalid input |
+| `colors reset --report R [--model M] [--apply]` | Reverts what `sync` wrote: chart fills back to the theme colour, matrix colour entries removed |
+| `bookmarks build ENTRIES --report R [--base ID] [--group G]` | Renders one answer bookmark per entry of a JSON list from a working base bookmark (picks, matrix and chart captures, visibility, category, date and drill level), registered in a `bookmarks.json` group. `--keep-ids` re-renders in place; one invalid entry writes nothing |
+| `rename-measure OLD NEW --model M [--dry-run]` | Renames a measure in every visual and bookmark of every report under the model's folder, including saved selections and labels; the dry-run count equals the rewrite count |
+| `rename-label CLIENT_DIR --pair OLD NEW [--apply]` | Renames a field-parameter row label in the selector tables and in every report that remembers it as a selection |
+
+Details, configuration and exit codes: [`docs/commands.md`](docs/commands.md).
 
 ## Zip output
 

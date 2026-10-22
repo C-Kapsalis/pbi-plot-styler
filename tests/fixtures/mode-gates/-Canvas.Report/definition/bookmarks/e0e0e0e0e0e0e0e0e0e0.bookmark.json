@@ -1,0 +1,107 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/1.4.0/schema.json",
+  "displayName": "Backend | View",
+  "name": "e0e0e0e0e0e0e0e0e0e0",
+  "explorationState": {
+    "version": "1.3",
+    "activeSection": "6c6d6e6f606162636465",
+    "sections": {
+      "6c6d6e6f606162636465": {
+        "filters": {
+          "byExpr": [
+            {
+              "name": "d0d0d0d0d0d0d0d0d0d0",
+              "type": "Advanced",
+              "filter": {
+                "Version": 2,
+                "From": [
+                  {
+                    "Name": "w",
+                    "Entity": "w-Visuals Filters",
+                    "Type": 0
+                  }
+                ],
+                "Where": []
+              },
+              "expression": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "w-Visuals Filters"
+                    }
+                  },
+                  "Property": "f-Slicer"
+                }
+              }
+            }
+          ]
+        },
+        "visualContainers": {
+          "dropdown01": {
+            "singleVisual": {
+              "visualType": "slicer"
+            },
+            "filters": {
+              "byName": {
+                "a0a0a0a0a0a0a0a0a0a0": {
+                  "name": "a0a0a0a0a0a0a0a0a0a0",
+                  "type": "Advanced",
+                  "filter": {
+                    "Version": 2,
+                    "From": [
+                      {
+                        "Name": "f",
+                        "Entity": "f-Filters",
+                        "Type": 0
+                      }
+                    ],
+                    "Where": [
+                      {
+                        "Condition": {
+                          "Comparison": {
+                            "ComparisonKind": 1,
+                            "Left": {
+                              "Measure": {
+                                "Expression": {
+                                  "SourceRef": {
+                                    "Source": "f"
+                                  }
+                                },
+                                "Property": "f-Slicer"
+                              }
+                            },
+                            "Right": {
+                              "Literal": {
+                                "Value": "0L"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "expression": {
+                    "Measure": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "f-Filters"
+                        }
+                      },
+                      "Property": "f-Slicer"
+                    }
+                  },
+                  "howCreated": 1
+                }
+              }
+            }
+          },
+          "range01": {
+            "singleVisual": {
+              "visualType": "slicer"
+            }
+          }
+        }
+      }
+    }
+  }
+}

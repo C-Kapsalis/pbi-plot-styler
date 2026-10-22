@@ -1,0 +1,35 @@
+table 'x-Selector 1'
+	lineageTag: 00000000-0000-0000-0000-230239323858
+
+	column 'x-Selector 1'
+		summarizeBy: none
+		sourceColumn: [Value1]
+		sortByColumn: 'x-Selector 1 Order'
+
+		relatedColumnDetails
+			groupByColumn: 'x-Selector 1 Fields'
+
+	column 'x-Selector 1 Fields'
+		isHidden
+		summarizeBy: none
+		sourceColumn: [Value2]
+
+		extendedProperty ParameterMetadata =
+				{
+				  "version": 3,
+				  "kind": 2
+				}
+
+	column 'x-Selector 1 Order'
+		isHidden
+		formatString: 0
+		summarizeBy: sum
+		sourceColumn: [Value3]
+
+	partition 'x-Selector 1' = calculated
+		mode: import
+		source =
+				{
+				    ( "Cost/ New Customer", NAMEOF ( [Cost per New Customer] ), 1 ),
+				    ( "Cohort Cost/ New Customer", NAMEOF ( [Cohort Cost per New Customer] ), 2 )
+				}

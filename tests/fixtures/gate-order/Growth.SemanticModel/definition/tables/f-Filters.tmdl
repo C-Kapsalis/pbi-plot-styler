@@ -1,0 +1,5 @@
+table 'f-Filters'
+
+	measure 'f-Slicer' = 1
+
+	measure 'f-All' = 1
