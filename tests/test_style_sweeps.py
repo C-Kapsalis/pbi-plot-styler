@@ -46,8 +46,8 @@ def test_a_sweep_skips_a_report_bound_to_a_published_dataset(tmp_path, project, 
     _bind_to_dataset(root / "brewbar" / "Brewbar.Report")
     result = _run(root)
     assert result.exit_code == 0, result.output
-    assert "Skipped:  brewbar/Brewbar.Report (" in result.output
-    assert "1 skipped" in result.output
+    assert "SKIPPED - no paired SemanticModel" in result.output
+    assert "(1 skipped)" in result.output
     styled = _visual(root / "roastery" / "Roastery.Report", "monthlyperformance", "combo01")
     assert _meta(styled["visual"]["objects"]["dataPoint"]) == EXPECTED_KEYS
 
@@ -57,13 +57,15 @@ def test_a_sweep_skips_a_report_whose_model_styles_nothing(tmp_path, project, br
     # only the brewbar model has this field parameter
     result = _run(root, "--table", "Bar Metrics")
     assert result.exit_code == 0, result.output
-    assert "Skipped:  roastery/Roastery.Report (" in result.output
-    assert "1 skipped" in result.output
+    assert "SKIPPED - no paired SemanticModel" in result.output
+    assert "(2 skipped)" in result.output
 
 
-def test_a_single_report_bound_to_a_dataset_is_still_fatal(report_dir):
+def test_a_single_report_bound_to_a_dataset_is_skipped(report_dir):
     _bind_to_dataset(report_dir)
-    assert _run(report_dir).exit_code == 2
+    result = _run(report_dir)
+    assert result.exit_code == 0, result.output
+    assert "SKIPPED - no paired SemanticModel" in result.output
 
 
 def test_a_sweep_with_model_keeps_the_fatal_error(tmp_path, project, brewbar):
@@ -101,10 +103,10 @@ def test_a_table_pattern_in_the_config_file(report_dir, tmp_path):
 def test_style_prints_entry_counts_exclusions_and_totals(brewbar_report):
     result = _run(brewbar_report, "--exclude-role", "Y")
     assert result.exit_code == 0, result.output
-    line = next(ln for ln in result.output.splitlines() if "styled" in ln and "combo10" in ln)
+    line = next(ln for ln in result.output.splitlines() if "combo10" in ln)
     assert "dataPoint 5 -> 6, labels 3 -> 5" in line
-    assert "column side, not styled: Sales Measures.Orders #, Sales Measures.Revenue" in line
-    assert "Totals: 0 rebind(s), 0 skipped." in result.output
+    assert "2 columns-role measure(s) excluded" in line
+    assert "rebuilt 1/1 combo chart(s)." in result.output
 
 
 # -- SC44: seed a transparency without overwriting ----------------------------------
@@ -148,7 +150,7 @@ def test_style_a_page_folder_restyles_only_its_visuals(report_dir):
     before = other.read_bytes()
     result = _run(page)
     assert result.exit_code == 0, result.output
-    assert "Restyled 1/1 visual(s)" in result.output
+    assert "rebuilt 1/1 combo chart(s)." in result.output
     assert other.read_bytes() == before
     assert _meta(_visual(report_dir, "monthlyperformance", "combo01")["visual"]["objects"]["dataPoint"]) \
         == EXPECTED_KEYS
@@ -160,6 +162,6 @@ def test_style_a_visual_file(report_dir):
     before = other.read_bytes()
     result = _run(target, "--dry-run")
     assert result.exit_code == 1, result.output
-    assert "1/1 visual(s) would change." in result.output
+    assert "1/1 combo chart(s) need rebuild (re-run without --dry-run)." in result.output
     assert _run(target).exit_code == 0
     assert other.read_bytes() == before

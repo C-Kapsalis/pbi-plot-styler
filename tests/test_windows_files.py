@@ -135,6 +135,6 @@ def test_bom_visual_is_styled_and_keeps_its_bom(tmp_path):
     assert result.exit_code == 0, result.output
     styled = [p for p in report.rglob("visual.json")]
     assert styled and all(p.read_bytes().startswith(BOM) for p in styled)
-    assert "Restyled 0/" not in result.output
+    assert "rebuilt 0/" not in result.output
     again = run("style", report, "--dry-run")
     assert again.exit_code == 0, again.output

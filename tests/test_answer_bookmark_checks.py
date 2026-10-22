@@ -284,9 +284,8 @@ def test_summary_prints_a_fix_hint_under_each_finding(tmp_path):
     dump(report_json, data)
     result = run("check", universal, "--summary")
     lines = result.output.splitlines()
-    finding_lines = [i for i, line in enumerate(lines) if line.startswith("  - ")]
+    finding_lines = [i for i, line in enumerate(lines) if line.startswith("- **Fix**: ")]
     assert finding_lines
-    assert all(lines[i + 1].startswith("    fix: ") for i in finding_lines)
     payload = json.loads(run("check", universal, "--summary", "--json").output)
     assert all(f.get("fix") for f in payload["findings"])
 

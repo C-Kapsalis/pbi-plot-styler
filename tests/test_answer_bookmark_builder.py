@@ -1095,14 +1095,14 @@ def test_self_test(builder):
     result = run("bookmarks", "build", "--self-test", "--report", _report(builder),
                  "--config", builder / "builder.toml")
     assert result.exit_code == 0, result.output
-    assert result.output == "self-test PASS\n"
+    lines = result.output.splitlines()
+    assert lines[0] == "self-test PASS" and lines[1].startswith("  generated: ")
+    assert lines[2] == "  measures: ['Self Test #']"
+    assert lines[3] == "  matrix projections.Rows count: 0"
     legacy = run("bookmarks", "build", "--self-test", "--legacy-layout", "--report", _report(builder),
                  "--config", builder / "builder.toml")
-    lines = legacy.output.splitlines()
     assert legacy.exit_code == 0, legacy.output
-    assert lines[0] == "self-test PASS" and lines[1].startswith("  generated: ")
-    assert lines[2] == "  measures: ['Self Test A', 'Self Test B', 'Self Test C']"
-    assert lines[3] == "  matrix projections.Rows count: 1"
+    assert legacy.output == "self-test PASS\n"
     assert not list(_bookmarks_dir(builder).glob("*.bookmark.json"))[1:]
 
 

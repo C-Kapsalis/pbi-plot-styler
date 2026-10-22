@@ -49,7 +49,8 @@ from .colors import reset as color_reset
 from .colors import sync as color_sync
 from .labels import LabelRenameError, rename_labels
 from .rename import count_measure_refs, rename_measure, report_roots
-from .rules import SUMMARY_RULES, UNBASELINABLE, RuleContext, RuleError, fix_hint, rules
+from .rules import (RULE_REPORT, SUMMARY_RULES, UNBASELINABLE, RuleAbort, RuleContext,
+                    RuleError, finding_type, fix_hint, rules)
 from .rules.answers import load_display_name_filter
 from .tmdl import SemanticModel
 
@@ -98,6 +99,12 @@ def main() -> None:
 
 
 # -- shared helpers ------------------------------------------------------------
+def _abort(message: str) -> None:
+    """Print an error line on stderr and exit with EXIT_ERROR."""
+    click.echo(message, err=True)
+    sys.exit(EXIT_ERROR)
+
+
 def _discover(path: Path):
     discovery = discover_reports(path)
     for skipped, reason in discovery.skipped:
@@ -128,7 +135,7 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
 @main.command(DEFAULT_COMMAND)
 @click.argument(
     "report_dir",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(path_type=Path),
 )
 @click.option(
     "--model",
@@ -304,6 +311,8 @@ def style(
     deterministically and idempotently, keeping every other formatting
     entry intact.
     """
+    if not report_dir.exists():
+        _abort(f"ERROR: {report_dir.resolve()} does not exist")
     if config_path is None:
         default_config = Path.cwd() / DEFAULT_CONFIG_FILENAME
         if default_config.is_file():
@@ -358,31 +367,36 @@ def style(
                 f"{report_dir} is not inside a *.Report folder. Pass a report "
                 f"folder, a folder of reports, a page folder or a visual.json.")
         within, report_dir = report_dir.resolve(), enclosing
-    discovery = _discover(report_dir)
+    discovery = discover_reports(report_dir)
+    if not discovery.reports:
+        raise StylerError(
+            f"no *.Report folders found under {report_dir}. Pass a PBIP report "
+            f"folder (one containing definition.pbir and definition/pages), "
+            f"or a folder that contains one or more of them."
+        )
     root = report_dir
     models: dict[Path, SemanticModel] = {}
     changes: list[VisualChange] = []
     all_keys: set[str] = set()
-    # In a sweep of several reports with no --model, a report that cannot be
-    # paired with a model (or whose model styles nothing) is skipped; a
-    # single named report keeps the fatal error.
+    #: the combo visuals of a report the run could not pair with a model.
+    skipped_visuals: list[str] = []
+    #: visual files that do not parse: (path, the JSON error).
+    unreadable: list[tuple[Path, str]] = []
+    # A report that cannot be paired with a model is skipped; a report whose
+    # model has no usable field parameters is an error unless the run sweeps
+    # several reports and no --model was named.
     lenient = not discovery.single and model_dir is None
-    skipped_reports: list[tuple[Path, str]] = []
-
-    def skip_or_fail(report: Path, reason: str) -> None:
-        if not lenient:
-            raise StylerError(reason)
-        skipped_reports.append((report, reason))
-        click.echo(f"Skipped:  {report.relative_to(root).as_posix()} ({reason})")
 
     for report in discovery.reports:
-        if not discovery.single:
-            click.echo(f"Report:   {report.relative_to(root).as_posix()}")
         try:
             resolved_model = (model_dir or resolve_model_dir(report)).resolve()
             if resolved_model not in models:
                 models[resolved_model] = SemanticModel.load(resolved_model)
             model = models[resolved_model]
+        except (FileNotFoundError, LookupError, OSError, ValueError):
+            skipped_visuals += _combo_visuals(report, config.visual_types)
+            continue
+        try:
             detected = detect_field_parameters(model.raw_by_table,
                                                model.measures_by_table)
             if explicit_tables:
@@ -390,7 +404,6 @@ def style(
                 # original
                 tables = _expand_tables(config.field_parameter_tables, model)
                 field_parameters = tables
-                click.echo(f"Field parameters: {', '.join(tables)} (explicit)")
             else:
                 # no explicit list: the model's own field parameters are
                 # detected from its TMDL. The measures the styling drives
@@ -409,23 +422,24 @@ def style(
                            if detected.metric or detected.mixed else ""))
             measure_keys = model.field_parameter_measures(tables) if tables else []
         except (FileNotFoundError, LookupError, OSError, ValueError) as exc:
-            skip_or_fail(report, str(exc))
+            if not lenient:
+                raise StylerError(str(exc)) from exc
+            skipped_visuals += _combo_visuals(report, config.visual_types)
             continue
 
         if not measure_keys:
-            skip_or_fail(report,
-                f"no measures resolved from field-parameter tables "
-                f"{list(config.field_parameter_tables)} in {resolved_model}, "
-                f"so there is nothing to style. The tables exist, but none "
-                f"of their NAMEOF references match a measure declared in the "
-                f"model. Check that the configured tables reference "
-                f"measures, not only columns."
-            )
+            if not lenient:
+                raise StylerError(
+                    f"no measures resolved from field-parameter tables "
+                    f"{list(config.field_parameter_tables)} in {resolved_model}, "
+                    f"so there is nothing to style. The tables exist, but none "
+                    f"of their NAMEOF references match a measure declared in the "
+                    f"model. Check that the configured tables reference "
+                    f"measures, not only columns."
+                )
+            skipped_visuals += _combo_visuals(report, config.visual_types)
             continue
         all_keys.update(k.lower() for k in measure_keys)
-
-        click.echo(f"Model:    {resolved_model}")
-        click.echo(f"Measures: {len(measure_keys)} drive the styling")
 
         # every field parameter of the model can bind an excluded role
         # (v1.1.0 behaviour), not only the configured or matched tables
@@ -443,6 +457,7 @@ def style(
                     slots=model.palette_slots(tables),
                     model=model,
                     within=within,
+                    errors=unreadable,
                 )
             )
         except FileNotFoundError as exc:
@@ -461,7 +476,10 @@ def style(
             f"as the model declares it."
         )
 
-    if not changes:
+    for path, reason in unreadable:
+        click.echo(f"  ERROR reading {path}: {reason}", err=True)
+
+    if not changes and not skipped_visuals and not unreadable:
         raise StylerError(
             f"no targeted visuals found in {len(discovery.reports)} "
             f"report(s) under {root}: no visual has a visualType in "
@@ -470,43 +488,92 @@ def style(
         )
 
     pending = [c for c in changes if c.changed]
-    verb = "would rebind" if dry_run else "rebound"
-    for change in changes:
-        for rb in change.rebinds:
-            click.echo(
-                f"  {verb} {change.path.relative_to(root).as_posix()}: "
-                f"{rb.entity}[{rb.old}] -> [{rb.new}]"
-            )
-    rebinds = sum(len(c.rebinds) for c in changes)
-    totals = f"{rebinds} rebind(s), {len(skipped_reports)} skipped"
+    for name in skipped_visuals:
+        click.echo(f"  {name}: SKIPPED - no paired SemanticModel "
+                   f"(missing definition.pbir / no x-Selector measures)")
     if dry_run:
         for change in pending:
-            click.echo()
-            click.echo(change.unified_diff(root), nl=False)
-        for change in pending:
-            click.echo(_visual_detail(change, root, "would style"))
-        click.echo(
-            f"\n{len(pending)}/{len(changes)} visual(s) would change."
-            if pending
-            else f"\nAll {len(changes)} visual(s) already styled."
-        )
-        click.echo(f"Totals: {totals}.")
+            _dry_run_block(change)
     else:
+        for change in changes:
+            for rb in change.rebinds:
+                click.echo(f"  {change.path.parent.name}: Y2 rebound  "
+                           f"{rb.entity!r}.{rb.old!r}  ->  {rb.entity!r}.{rb.new!r}")
         written = apply_changes(changes)
         for change in pending:
-            click.echo(_visual_detail(change, root, "styled"))
-        click.echo(
-            f"\nRestyled {written}/{len(changes)} visual(s); "
-            f"{len(changes) - written} already styled."
-        )
-        click.echo(f"Totals: {totals}.")
+            click.echo(_result_line(change))
+    rebinds = sum(len(c.rebinds) for c in changes)
+    total = len(changes) + len(skipped_visuals) + len(unreadable)
+    skip_note = f" ({len(skipped_visuals) + len(unreadable)} skipped)" if (
+        skipped_visuals or unreadable) else ""
+    click.echo()
+    click.echo(f"Models resolved: {len(models)}")
+    if dry_run:
+        if pending or unreadable:
+            click.echo(f"{len(pending)}/{total} combo chart(s) need rebuild{skip_note} "
+                       f"(re-run without --dry-run).")
+        else:
+            click.echo(f"All {total} combo chart(s) already in sync{skip_note}.")
+    else:
+        line = f"rebuilt {written}/{total} combo chart(s){skip_note}"
+        if rebinds:
+            line += f" / rebound {rebinds} stale Y2 projection(s)"
+        click.echo(line + ".")
 
     if zip_path is not None:
         write_zip(discovery.reports, changes, zip_path, base=root.parent)
         click.echo(f"Wrote {zip_path}")
 
-    if dry_run and pending:
+    if unreadable and not dry_run:
+        sys.exit(EXIT_ERROR)
+    if dry_run and (pending or unreadable):
         sys.exit(EXIT_DRIFT)
+
+
+def _combo_visuals(report: Path, visual_types: tuple[str, ...]) -> list[str]:
+    """The names of a report's visuals of the targeted types, in path order."""
+    names: list[str] = []
+    pages = report / "definition" / "pages"
+    if not pages.is_dir():
+        return names
+    for path in sorted(pages.rglob("visual.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if (data.get("visual") or {}).get("visualType") in visual_types:
+            names.append(path.parent.name)
+    return names
+
+
+def _result_line(change: VisualChange) -> str:
+    """The per-visual result line of a written visual."""
+    counts = dict((card, (before, after)) for card, before, after in change.counts)
+    dp_before, dp_after = counts.get("dataPoint", (0, 0))
+    lb_before, lb_after = counts.get("labels", (0, 0))
+    line = len(change.styled)
+    excluded = len(change.excluded)
+    entries = "entry" if change.bar_side == 1 else "entries"
+    return (f"  {change.path.parent.name}: dataPoint {dp_before} -> {dp_after}, "
+            f"labels {lb_before} -> {lb_after} ({line} line measures each; "
+            f"{excluded} columns-role measure(s) excluded; "
+            f"{change.bar_side} bar-side {entries} preserved)")
+
+
+def _dry_run_block(change: VisualChange) -> None:
+    """The per-visual block of a dry run."""
+    click.echo(f"  {change.path.parent.name}: WOULD CHANGE")
+    if change.column_side:
+        click.echo("    columns-role measure(s) kept OUT of the line set: "
+                   + ", ".join(change.column_side))
+    for rb in change.rebinds:
+        click.echo(f"    Y2 stale: {rb.entity!r}.{rb.old!r} -> "
+                   f"would rebind to {rb.new!r}")
+    counts = dict((card, (before, after)) for card, before, after in change.counts)
+    for card in ("dataPoint", "labels"):
+        before, after = counts.get(card, (0, 0))
+        if before != after:
+            click.echo(f"    objects.{card}[]: {before} -> {after} entries")
 
 
 def _expand_tables(names: tuple[str, ...], model: SemanticModel) -> tuple[str, ...]:
@@ -526,14 +593,6 @@ def _expand_tables(names: tuple[str, ...], model: SemanticModel) -> tuple[str, .
             matched = [name]
         out += [t for t in matched if t not in out]
     return tuple(out)
-
-
-def _visual_detail(change: VisualChange, root: Path, verb: str) -> str:
-    counts = ", ".join(f"{card} {before} -> {after}" for card, before, after in change.counts)
-    line = f"  {verb} {change.path.relative_to(root).as_posix()}: {counts}"
-    if change.excluded:
-        line += f"; column side, not styled: {', '.join(change.excluded)}"
-    return line
 
 
 # -- check ---------------------------------------------------------------------
@@ -564,7 +623,7 @@ def _filtered_reports(path: Path, report_name: str | None, model_name: str | Non
 @main.command("check")
 @click.argument(
     "path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=click.Path(path_type=Path),
 )
 @click.option(
     "--model",
@@ -582,7 +641,20 @@ def _filtered_reports(path: Path, report_name: str | None, model_name: str | Non
     help="Run this rule instead of the default 'integrity' checks "
     "(repeatable). Rules: integrity, slicer-gates, slicer-mode-gates, "
     "category-filter, theme, visual-position, y-combo, filter-panel, "
-    "format-selector, stale-placeholders, answer-bookmarks, bookmark-literals.",
+    "format-selector, stale-placeholders, answer-bookmarks, bookmark-literals. "
+    "slicer-gates: Enforce the `f-Slicer > 0` visual-level gate on every "
+    "Report field-parameter slicer (foundation rule #1). Check: scan only; "
+    "exit 1 if any Report slicer lacks the gate. Fix: inject the gate into "
+    "every violating slicer in place. "
+    "slicer-mode-gates: Enforce the owner's slicer-gate convention across a "
+    "report. Dropdown slicer -> visual-level filter [f-Slicer] > 0. "
+    "Vertical-list slicer -> visual-level filter [f-All] > 0. "
+    "format-selector: Enforce the z-Selector Format='Format' report-level "
+    "filter across every Report report. Check: scan only; exit 1 if any "
+    "report lacks the filter. Fix: add or repair the filter on every report "
+    "under PATH. "
+    "stale-placeholders: pbi-plot-styler check --rule stale-placeholders "
+    "--fix — repoint a saved blank-dimension binding.",
 )
 @click.option(
     "--config",
@@ -680,6 +752,8 @@ def check(
         raise StylerError(
             f"unknown rule(s) {', '.join(unknown)}. Valid rules: {_rule_help()}."
         )
+    if not path.exists():
+        _abort(f"ERROR: {path.resolve()} does not exist")
     if dry_run and not fix:
         raise StylerError("--dry-run only applies to --fix: add --fix to preview the fixes.")
     if config_path is None:
@@ -713,6 +787,8 @@ def check(
     accepted = {k for k in accepted if k[0] not in UNBASELINABLE}
 
     options: dict = {}
+    options["check_path"] = path
+    options["dry_run"] = "1" if dry_run else ""
     try:
         builder = load_builder_settings(config_path)
         options["picker_labels"] = {vid: key for key, vid in builder.pickers.items()}
@@ -752,6 +828,8 @@ def check(
     planned: list[tuple[Path, str]] = []
     diffs: list[str] = []
     refused: list[tuple[Path, str]] = []
+    fix_lines: list[str] = []
+    fix_summary_lines: list[str] = []
     findings: list[Finding] = []
     skipped_notes: list[str] = []
     checked: dict[str, int] = {}
@@ -760,6 +838,7 @@ def check(
     def keep_notes(ctx: RuleContext) -> None:
         skipped_notes.extend(n for n in ctx.skipped if n not in skipped_notes)
 
+    fixers: list = []
     if fix:
         fixers = [registry[s] for s in slugs if registry[s].fix is not None]
         # Everything a fixer needs is checked for every report before any
@@ -769,20 +848,43 @@ def check(
                 for rule in fixers:
                     if rule.prepare is not None:
                         rule.prepare(contexts[report]())
+        except RuleAbort as exc:
+            _abort(str(exc))
         except RuleError as exc:
             raise StylerError(f"{exc}. --fix stopped before writing: nothing was written.") from exc
         if dry_run:
             planned, diffs, refused = _plan_fixes(reports, root, fixers, contexts, keep_notes)
+            for report in reports:
+                for rule in fixers:
+                    if rule.render_fix is not None:
+                        fix_lines += rule.render_fix(contexts[report](), [])
         else:
             try:
                 for report in reports:
                     for rule in fixers:
                         ctx = contexts[report]()
-                        fixed += rule.fix(ctx)
+                        changes = rule.fix(ctx)
+                        fixed += changes
+                        if rule.render_fix is not None:
+                            fix_lines += rule.render_fix(ctx, changes)
+                        if not rule.replace_fix_lines:
+                            fix_lines += [
+                                f"fixed    {p.relative_to(root).as_posix()}: {d}"
+                                for p, d in changes
+                            ]
                         refused += ctx.options.pop("refused", [])
+                        for path, message in ctx.options.pop("read_errors", []):
+                            click.echo(message, err=True)
+                        for message in ctx.options.pop("stderr_lines", []):
+                            click.echo(message, err=True)
                         keep_notes(ctx)
+            except RuleAbort as exc:
+                _abort(str(exc))
             except RuleError as exc:
                 raise StylerError(_partial_fix_message(exc, fixed, root)) from exc
+    for rule in fixers:
+        if rule.fix_summary is not None:
+            fix_summary_lines += rule.fix_summary(contexts)
 
     for report in reports:
         ctx = contexts[report]()
@@ -796,6 +898,8 @@ def check(
                 if not registry[slug].ordered:
                     added = sorted(added, key=lambda f: (f.file, f.check_id, f.subject))
                 found += added
+        except RuleAbort as exc:
+            _abort(str(exc))
         except RuleError as exc:
             raise StylerError(str(exc)) from exc
         findings += found
@@ -805,7 +909,14 @@ def check(
         for slug, counts in ctx.details.items():
             total = details.setdefault(slug, {})
             for what, n in counts.items():
-                total[what] = total.get(what, 0) + n
+                if isinstance(n, bool):
+                    total[what] = n
+                elif isinstance(n, int):
+                    total[what] = total.get(what, 0) + n
+                elif isinstance(n, list):
+                    total.setdefault(what, []).extend(n)
+                else:
+                    total[what] = n
 
     if "bookmark-literals" in slugs and "bookmark-literals" not in checked:
         raise StylerError(
@@ -872,16 +983,20 @@ def check(
         for note in notes:
             click.echo(f"note: {note}", err=True)
         for note in skipped_notes:
-            click.echo(f"skipped  {note}")
-        for p, d in fixed:
-            click.echo(f"fixed    {p.relative_to(root).as_posix()}: {d}")
+            if "stale-placeholders:" not in note:
+                click.echo(f"skipped  {note}")
+        for line in fix_lines:
+            click.echo(line)
         for p, d in planned:
             click.echo(f"would fix {p.relative_to(root).as_posix()}: {d}")
         for diff in diffs:
             click.echo(diff, nl=False)
         for p, r in refused:
             click.echo(f"REFUSED  {p.relative_to(root).as_posix()}: {r}")
-        for line in _finding_lines(registry, slugs, new, details, settings):
+        for line in _finding_lines(registry, slugs, new, details, settings, path, fix,
+                                   summary):
+            click.echo(line)
+        for line in fix_summary_lines:
             click.echo(line)
         by_id: dict[str, list[str]] = {}
         for check_id, location in healed:
@@ -919,7 +1034,8 @@ def _framing(f: Finding) -> str:
 
 
 def _finding_lines(registry, slugs, new: list[Finding], details: dict,
-                   settings: Settings) -> list[str]:
+                   settings: Settings, check_path: Path | None = None,
+                   fixing: bool = False, summary: bool = False) -> list[str]:
     """The text lines of the new findings, grouped per rule in run order.
 
     A rule with its own ``render`` adds its header and summary lines; any
@@ -933,6 +1049,10 @@ def _finding_lines(registry, slugs, new: list[Finding], details: dict,
         "dropdowns": "/".join(settings.panel.filter_tables[:1] + tuple(
             t.rsplit(" ", 1)[-1] for t in settings.panel.filter_tables[1:])),
         "slot_table": settings.placeholders.template_slot_table,
+        "check_path": str(check_path.resolve()) if check_path else "",
+        "check_folder": check_path.name if check_path else "",
+        "fixing": "1" if fixing else "",
+        "summary": "1" if summary else "",
     }
     owner: dict[int, str] = {}
     for f in new:
@@ -1075,10 +1195,14 @@ def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> d
         own = [f for f in findings if f.check_id in rule.summarised]
         critical = [f for f in own if f.check_id in rule.critical and f.severity == "error"]
         total = checked.get(slug, 0)
-        failing = len({f.location for f in critical})
+        # the passed count is over the components the original judged: a
+        # bookmark capture never counts against a visual
+        failing = len({f.location for f in critical if f.check_id not in _CAPTURE_ONLY})
         rows.append({
             "rule": slug,
             "title": rule.title,
+            "number": RULE_REPORT[slug][0],
+            "report_name": RULE_REPORT[slug][1],
             "checked": total,
             "passed": max(total - failing, 0),
             # any error finding of the rule breaks compliance, not only the
@@ -1086,38 +1210,96 @@ def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> d
             "compliant": not any(f.severity == "error" for f in own),
             "errors": sum(f.severity == "error" for f in own),
             "warnings": sum(f.severity == "warning" for f in own),
+            "findings": [_compliance_finding(f) for f in own],
         })
     compliant = sum(r["compliant"] for r in rows)
     return {
         "total_rules": len(rows),
         "compliant_rules": compliant,
         "compliance_percentage": round(100.0 * compliant / len(rows), 1),
-        "errors": sum(r["errors"] for r in rows),
-        "warnings": sum(r["warnings"] for r in rows),
+        "critical_violations": sum(r["errors"] for r in rows),
+        "warning_violations": sum(r["warnings"] for r in rows),
+        "info_violations": 0,
         "overall_compliance": compliant == len(rows)
         and not any(r["errors"] for r in rows),
         "rules": rows,
     }
 
 
+#: ids whose findings are a capture, not a component the rule judged.
+_CAPTURE_ONLY = frozenset({"GAT002"})
+
+
+def _compliance_finding(finding: Finding) -> dict:
+    """One finding of the compliance report: its type, text and fix."""
+    kind, description, component = finding_type(finding.check_id)
+    if description is None and kind is None:
+        description = finding.message
+    elif description is None:
+        description = finding.message.split(" (Expected:", 1)[0]
+    if component is None:
+        component = finding.subject
+    return {
+        "id": finding.check_id,
+        "subject": finding.subject,
+        "severity": finding.severity,
+        "type": kind,
+        "description": description,
+        "component": component,
+        "fix": fix_hint(finding.check_id),
+    }
+
+
 def _compliance_text(compliance: dict, findings: list[Finding]) -> str:
-    lines = ["", "## Foundation rules", ""]
-    registry = rules()
+    """The compliance report of the four foundation rules."""
+    _force_utf8()
+    total = compliance["total_rules"]
+    compliant = compliance["compliant_rules"]
+    score = compliance["compliance_percentage"]
+    critical = compliance["critical_violations"]
+    warnings = compliance["warning_violations"]
+    lines = [
+        "",
+        "\U0001F50D Template Foundation Rules Comprehensive Report:",
+        "=" * 60,
+        "# Template Foundation Rules Validation Report",
+        "",
+        f"**Overall Compliance**: {score}% ({compliant}/{total} rules)",
+        f"**Violations**: {critical} critical, {warnings} warnings",
+        "",
+    ]
     for row in compliance["rules"]:
-        status = "PASS" if row["compliant"] else "FAIL"
-        lines.append(f"- **{status}** `{row['rule']}`: {row['title']} "
-                     f"({row['passed']}/{row['checked']} passed)")
-        for f in findings:
-            if f.check_id in registry[row["rule"]].summarised:
-                lines.append(f"  - {f.severity} {f.check_id} {f.subject}: {f.message}")
-                lines.append(f"    fix: {fix_hint(f.check_id)}")
+        mark = "✅ PASS" if row["compliant"] else "❌ FAIL"
+        lines.append(f"## Rule #{row['number']}: {row['report_name']} {mark}")
+        lines.append(f"Components: {row['passed']}/{row['checked']} passed")
+        lines.append("")
+        for item in row["findings"]:
+            icon = "\U0001F534" if item["severity"] == "error" else "⚠️"
+            kind = item["type"] or item["id"]
+            lines.append(f"**{icon} {kind}** ({item['component']})")
+            lines.append(f"- {item['description']}")
+            if item["fix"]:
+                lines.append(f"- **Fix**: {item['fix']}")
+            lines.append("")
     lines.append("")
-    lines.append(
-        f"Compliance: {compliance['compliant_rules']}/{compliance['total_rules']} "
-        f"rules ({compliance['compliance_percentage']}%), "
-        f"{compliance['errors']} error(s), {compliance['warnings']} warning(s)."
-    )
+    lines.append("\U0001F4CA Summary:")
+    lines.append(f"   Overall Compliance: {compliance['overall_compliance']}")
+    lines.append(f"   Rules Passed: {compliant}/{total}")
+    lines.append(f"   Compliance Score: {score}%")
+    lines.append(f"   Critical Issues: {critical}")
+    lines.append(f"   Warnings: {warnings}")
     return "\n".join(lines)
+
+
+def _force_utf8() -> None:
+    """Let the report's marks print on a console that is not UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (OSError, ValueError):
+                pass
 
 
 # -- colors ----------------------------------------------------------------------
@@ -1129,7 +1311,7 @@ EXIT_INVALID = 2
 
 @main.group("colors")
 def colors() -> None:
-    """Stamp each measure's palette colour from the model's palette measure."""
+    """Synchronize measure colours across field-parameter columns and tables."""
 
 
 def _color_options(func):
@@ -1146,7 +1328,7 @@ def _color_options(func):
     func = click.option("--palette-table", default="w-Colors", show_default=True,
                         help="The table searched first for the palette measure.")(func)
     func = click.option("--default-color-id", type=int, default=9, show_default=True,
-                        help="Theme data colour that reset reverts chart fills to.")(func)
+                        help="ThemeDataColor ColorId used by reset (default: 9)")(func)
     return func
 
 
@@ -1156,14 +1338,18 @@ def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
         model = model_dir or resolve_model_dir(report_dir)
         result = action(report_dir, model, opts, apply)
     except (PaletteError, FileNotFoundError, json.JSONDecodeError) as exc:
-        click.echo(f"Error: {exc}", err=True)
+        click.echo(f"FAIL: {exc}", err=True)
         sys.exit(EXIT_INVALID)
-    for line in result.info:
+    for line in result.header:
         click.echo(line)
-    for note in result.notes:
-        click.echo(f"note: {note}")
-    for change in result.changes:
-        click.echo(f"  {change}")
+    for line in result.listing:
+        click.echo(line)
+    for line in result.unsupported:
+        click.echo(line)
+    for line in result.collisions:
+        click.echo(line)
+    for line in result.unregistered:
+        click.echo(line)
     if action is color_sync:
         verb = "wrote" if apply else "would write"
         click.echo(f"{verb} {len(result.changed)} file(s): "
@@ -1174,10 +1360,15 @@ def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
         if not apply and result.changed:
             click.echo("")
             click.echo("(dry run -- pass --apply to write)")
-    elif apply:
-        click.echo(f"APPLIED: {len(result.written)} file(s) written.")
     else:
-        click.echo(f"DRY RUN: {len(result.changes)} change(s); rerun with --apply to write.")
+        verb = "restored" if apply else "would restore"
+        click.echo(f"{verb} {result.restored} colour entry/entries in "
+                   f"{len(result.changed)} file(s)")
+        for path in _sorted_changed(result.changed):
+            click.echo(f"   {_shown_path(report_dir, path)}")
+        if not apply and result.changed:
+            click.echo("")
+            click.echo("(dry run -- pass --apply to write)")
     pending = bool(result.changes) and not apply
     sys.exit(EXIT_COLORS_PENDING if pending else EXIT_OK)
 
@@ -1205,15 +1396,27 @@ def _shown_path(report_dir: Path, path: Path) -> str:
 @colors.command("sync")
 @_color_options
 @click.option("--visual-type", "visual_types", multiple=True,
-              help="Visual type to stamp (repeatable). Default: bar, line, combo "
-              "charts and matrices.")
+              help="limit changes to these visual types, e.g. pivotTable")
 @click.option("--min-series", type=int, default=2, show_default=True,
-              help="A bookmark capture with this many Y measures is multi-series.")
+              help="only report bookmarks pinning at least this many bars")
 @click.option("--all-visuals", is_flag=True,
-              help="Stamp every supported visual, not only the ones in scope.")
+              help="include every chart/table, beyond picker matrices and bookmarked multi-series charts")
 def colors_sync(report_dir, model_dir, apply, measure, palette_table, default_color_id,
                 visual_types, min_series, all_visuals) -> None:
-    """Colour each measure from its palette slot (dry run unless --apply).
+    """Synchronize measure colours across field-parameter columns and tables.
+
+    USE THIS WHEN measure colours drifted across visuals or a new measure was
+    registered — "re-stamp bar colours from c-Measure Color". Run
+    `pbi-plot-styler style` after it.
+
+    Read the picker and palette from [c-Measure Color] in w-Colors.tmdl. Stamp
+    identity-keyed column-series fills and matrix value/header colours
+    for every registered measure, including measures selected by future bookmarks.
+    Process bookmark formatting overrides as well as base visual formatting.
+
+    Default scope: all matrices using the palette's picker in a value role, plus
+    charts with bookmarked multi-measure selections. --all-visuals includes every
+    supported chart/table. Other visual types are outside this command's current scope.
 
     Exits 0 when the changes were written or none are needed, 1 when a dry
     run found changes to make, 2 on invalid input.
@@ -1221,7 +1424,8 @@ def colors_sync(report_dir, model_dir, apply, measure, palette_table, default_co
     opts = ColorOptions(measure=measure, host_table=palette_table,
                         default_color_id=default_color_id,
                         visual_types=tuple(visual_types) or ColorOptions().visual_types,
-                        min_series=min_series, all_visuals=all_visuals)
+                        min_series=min_series, all_visuals=all_visuals,
+                        filter_types=bool(visual_types))
     _run_colors(color_sync, report_dir, model_dir, apply, opts)
 
 
@@ -1234,12 +1438,12 @@ def colors_reset(report_dir, model_dir, apply, measure, palette_table,
                  default_color_id, visual_types) -> None:
     """Revert palette colours written by sync (dry run unless --apply).
 
-    Only the picker's registered measures are reverted, on visuals and on
-    bookmark overrides.
+    undo this command's literal colours: restore chart series to the report theme and remove matrix overrides
     """
     opts = ColorOptions(measure=measure, host_table=palette_table,
                         default_color_id=default_color_id,
-                        visual_types=tuple(visual_types) or ColorOptions().visual_types)
+                        visual_types=tuple(visual_types) or ColorOptions().visual_types,
+                        filter_types=bool(visual_types))
     _run_colors(color_reset, report_dir, model_dir, apply, opts)
 
 
@@ -1265,11 +1469,12 @@ def rename_label(client_dir: Path, pairs, patterns, apply: bool) -> None:
         raise StylerError(str(exc)) from exc
     width = max(len(str(count)) for _, _, count in result.counts)
     for old, new, count in result.counts:
-        click.echo(f'{count:>{width}}  "{old}" -> "{new}"')
+        click.echo(f'  {count:>{width}}  "{old}" -> "{new}"')
+    click.echo()
     verb = "APPLIED" if apply else "DRY RUN"
     click.echo(f"{verb}: {len(result.touched)} file(s)")
     for path in result.touched:
-        click.echo(f"  {path.relative_to(client_dir).as_posix()}")
+        click.echo(f"    {path.relative_to(client_dir).as_posix()}")
 
 
 # -- rename-measure ----------------------------------------------------------------

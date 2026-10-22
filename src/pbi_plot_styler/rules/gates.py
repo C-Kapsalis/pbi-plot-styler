@@ -27,7 +27,7 @@ from typing import Any, Iterator
 from .. import qx
 from ..canvas import Bookmark, Visual, dig, slicer_mode, slicer_selector_tables
 from ..tmdl import SemanticModel
-from . import RuleContext, RuleError, rewrite_json
+from . import RuleAbort, RuleContext, RuleError, rewrite_json, user_path
 
 
 # -- gate shapes ------------------------------------------------------------------
@@ -224,30 +224,62 @@ def check_slicer_gates(ctx: RuleContext) -> None:
     measure = ctx.settings.gates.slicer_measure
     slicers = _selector_slicers_on_visible_canvas(ctx)
     ctx.checked["slicer-gates"] = len(slicers)
-    if not slicers:
-        ctx.skip("slicer-gates: no selector slicer on a visible canvas page")
+    ctx.details["slicer-gates"] = {"selector slicers": len(slicers)}
     for visual in slicers:
         if not _has_active_visual_gate(visual, measure):
             ctx.add("GAT001", visual.path, visual.semantic_name,
-                    f"selector slicer {visual.semantic_name!r} has no active "
-                    f"[{measure}] > 0 filter, so it is always visible", fixable=True)
+                    f"{visual.semantic_name}  ({visual.path.resolve()})", fixable=True)
     for capture in _bookmark_selector_captures(ctx):
         if not _capture_has_gate(capture, measure):
             ctx.add("GAT002", capture.bookmark.path,
                     f"{capture.page_id}/{capture.container_id}",
-                    f"bookmark {capture.bookmark.display_name!r} captures selector "
-                    f"slicer {capture.container_id!r} without its [{measure}] gate; "
-                    f"applying the bookmark removes the gate", fixable=True)
+                    f"{capture.bookmark.path.name} -> page {capture.page_id} "
+                    f"vc {capture.container_id}", fixable=True)
 
 
-def _declaring_table(model: SemanticModel | None, measure: str, report: str) -> str:
-    table = model.declaring_table(measure) if model is not None else None
-    if table is None:
-        raise RuleError(
-            f"{report}: no table of the paired model declares [{measure}], so the "
-            f"gate cannot be bound; nothing was changed"
-        )
-    return table
+def render_slicer_gates(findings, counts, framing, values) -> list[str]:
+    """The blocks of a gate check: the visuals, the captures, the counts."""
+    seen = counts.get("selector slicers", 0)
+    visuals = [f for f in findings if f.check_id == "GAT001"]
+    captures = [f for f in findings if f.check_id == "GAT002"]
+    lines: list[str] = []
+    if values.get("fixing"):
+        return [framing(f) for f in findings]
+    if seen == 0:
+        lines.append(f"No Report field-parameter slicers found under {values['check_path']}")
+    if visuals:
+        lines.append(f"{len(visuals)}/{seen} visual(s) missing the active gate:")
+        lines += [framing(f) for f in visuals]
+    if captures:
+        lines.append("")
+        lines.append(f"{len(captures)} bookmark visualContainer(s) lack the active gate "
+                     f"(would erase it on apply):")
+        lines += [framing(f) for f in captures]
+    if not findings and seen and not values.get("fixing") and not values.get("summary"):
+        lines.append(f"All {seen} Report slicer(s) carry active `f-Slicer > 0` gates "
+                     f"AND all bookmarks restore them faithfully.")
+    return lines
+
+
+def _declaring_table(ctx: RuleContext, measure: str) -> str | None:
+    """The table that declares the gate measure, or ``None`` when none does.
+
+    A report the gate cannot be bound in is reported on stderr and left as
+    it is; the other reports are still fixed.
+    """
+    if ctx.model is None:
+        reason = ".pbir → .SemanticModel link couldn't be resolved"
+    else:
+        table = ctx.model.declaring_table(measure)
+        if table is not None:
+            return table
+        reason = (f"no `measure '{measure}'` declaration found under "
+                  f"{ctx.model.definition_dir / 'tables'}. The measure isn't defined "
+                  f"— fix the model first.")
+    ctx.options.setdefault("stderr_lines", []).append(
+        f"  ERROR ({user_path(ctx, ctx.report_dir)}): {reason}\n"
+        f"    skipping all violating slicers under this report.")
+    return None
 
 
 def fix_slicer_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
@@ -257,21 +289,15 @@ def fix_slicer_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
         if not _has_active_visual_gate(v, measure)
     ]
     captures = [c for c in _bookmark_selector_captures(ctx) if not _capture_has_gate(c, measure)]
-    if not slicers and not captures:
-        return []
-    try:
-        table = _declaring_table(ctx.model, measure, ctx.label)
-    except RuleError as exc:
-        # this report stays as it is; the other reports are still fixed and
-        # the re-check reports what is left
-        ctx.options.setdefault("refused", []).append((ctx.report_dir, str(exc)))
+    table = _declaring_table(ctx, measure)
+    if table is None:
         return []
     alias = gate_alias(ctx.settings.gates.table)
     changes: list[tuple[Path, str]] = []
     for visual in slicers:
         _set_visual_gate(visual, table, measure, alias)
         if rewrite_json(visual.path, visual.data):
-            changes.append((visual.path, f"active [{measure}] gate on {table!r}"))
+            changes.append((visual.path, f"patched visual {visual.semantic_name}"))
     touched: dict[Path, Bookmark] = {}
     for capture in captures:
         _set_bookmark_gate(capture.container, table, measure,
@@ -279,8 +305,62 @@ def fix_slicer_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
         touched[capture.bookmark.path] = capture.bookmark
     for path, bookmark in touched.items():
         if rewrite_json(path, bookmark.data):
-            changes.append((path, f"bookmark gate [{measure}] on {table!r}"))
+            changes.append((path, f"patched bookmark {path.name}"))
+    ctx.options.setdefault("gate_fixes", []).append({
+        "report": user_path(ctx, ctx.report_dir),
+        "table": table,
+        "model": _model_table_path(ctx, table),
+        "visuals": len(slicers),
+        "seen": len(_selector_slicers_on_visible_canvas(ctx, heuristic=False)),
+        "bookmarks": len(touched),
+        "files": len(touched),
+    })
     return changes
+
+
+def _model_table_path(ctx: RuleContext, table: str) -> str:
+    """Where the gate measure is declared, as the user sees it."""
+    model = ctx.model
+    if model is None:
+        return table
+    path = model.definition_dir / "tables" / f"{table}.tmdl"
+    try:
+        return ctx.rel(path)
+    except ValueError:
+        return path.as_posix()
+
+
+def render_slicer_gates_fix(ctx: RuleContext, changes: list[tuple[Path, str]]) -> list[str]:
+    """The per-report block of a gate fix."""
+    blocks = ctx.options.get("gate_fixes") or []
+    if not blocks:
+        return []
+    block = blocks[-1]
+    lines = [f"  {block['report']}: source entity = {block['table']!r}  "
+             f"(declared in {block['model']})"]
+    for path, description in changes:
+        if description.startswith("patched visual"):
+            lines.append(f"    {description}")
+    for path, description in changes:
+        if description.startswith("patched bookmark"):
+            lines.append(f"    {description}")
+    return lines
+
+
+def slicer_gates_fix_summary(contexts: dict) -> list[str]:
+    """The closing count of a gate fix."""
+    blocks = []
+    for factory in contexts.values():
+        ctx = factory()
+        blocks += ctx.options.get("gate_fixes") or []
+    if not blocks:
+        return []
+    patched = sum(b["visuals"] for b in blocks)
+    seen = sum(b["seen"] for b in blocks)
+    files = sum(b["files"] for b in blocks)
+    if not patched and not files:
+        return [f"All {seen} Report slicer(s) and bookmarks already gated; nothing to do."]
+    return ["", f"Patched {patched}/{seen} visual(s) and {files} bookmark file(s)."]
 
 
 # -- slicer-mode-gates ----------------------------------------------------------------
@@ -295,10 +375,9 @@ def gate_host_table(ctx: RuleContext) -> str:
         for table, measures in ctx.model.measures_by_table.items():
             if gates.slicer_measure in measures and gates.list_measure in measures:
                 return table
-    raise RuleError(
-        f"{ctx.label}: the paired semantic model does not declare both "
-        f"[{gates.slicer_measure}] and [{gates.list_measure}] on one table "
-        f"(expected {gates.table!r}); nothing was checked or changed"
+    raise RuleAbort(
+        f"!! could not find a table declaring both [{gates.slicer_measure}] and "
+        f"[{gates.list_measure}] for {user_path(ctx, ctx.report_dir)}"
     )
 
 
@@ -411,28 +490,54 @@ def check_mode_gates(ctx: RuleContext) -> None:
     table = gate_host_table(ctx)
     slicers = _mode_slicers(ctx)
     ctx.checked["slicer-mode-gates"] = len(slicers)
+    visuals = entries = 0
     for slicer in slicers:
         visual = slicer.visual
         state = gate_state(_first_visual_gate(visual, slicer.measure), "field", table)
         if state != "ok":
+            visuals += 1
             ctx.add(_STATE_IDS[state], visual.path, visual.folder,
-                    f"{slicer_mode(visual)} slicer {visual.folder!r}: [{slicer.measure}] "
-                    f"gate is {state.replace('_', ' ')} (expected an active gate on "
-                    f"{table!r})", fixable=True)
+                    f"{state:<12} {slicer_mode(visual):<9} -> {slicer.measure:<9} "
+                    f"{visual.page_id}/{visual.folder}", fixable=True)
     for bookmark, _page_id, cid, container, measure in _mode_captures(ctx, slicers):
         found = _first_bookmark_gate(container, measure)
         state = gate_state(found[1] if found else None, "expression", table)
         if state != "ok":
+            entries += 1
             ctx.add(_STATE_IDS[state], bookmark.path, f"{cid}",
                     f"bookmark {bookmark.display_name!r} captures {cid!r} with its "
-                    f"[{measure}] gate {state.replace('_', ' ')}", fixable=True)
+                    f"[{measure}] gate {state}", fixable=True)
     gate_measures = _gate_measures(ctx)
+    stale = files = 0
     for path, data in _report_documents(ctx):
-        stale = _stale_refs(data, gate_measures, table, repair=False)
-        if stale:
+        count = _stale_refs(data, gate_measures, table, repair=False)
+        if count:
+            stale += count
+            files += 1
             ctx.add("GAT005", path, "stale gate entities",
-                    f"{stale} gate reference(s) name a table other than {table!r}",
+                    f"{count} gate reference(s) name a table other than {table!r}",
                     fixable=True)
+    ctx.details["slicer-mode-gates"] = {
+        "visuals": visuals,
+        "bookmark entries": entries,
+        "stale references": stale,
+        "stale files": files,
+        "gate table": table,
+    }
+
+
+def render_mode_gates(findings, counts, framing, values) -> list[str]:
+    """The block of a mode-gate check: the source, the findings, the totals."""
+    table = counts.get("gate table", "")
+    if values.get("fixing"):
+        return [framing(finding) for finding in findings]
+    lines = [f"  gate source entity (from TMDL): {table!r}"]
+    lines += [framing(finding) for finding in findings]
+    lines.append(f"  Would patch {counts.get('visuals', 0)} visual(s) and "
+                 f"{counts.get('bookmark entries', 0)} bookmark entrie(s)")
+    lines.append(f"  Would patch {counts.get('stale references', 0)} stale entity "
+                 f"reference(s) -> {table!r} across {counts.get('stale files', 0)} file(s)")
+    return lines
 
 
 def fix_mode_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
@@ -440,22 +545,85 @@ def fix_mode_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
     alias = gate_alias(ctx.settings.gates.table)
     slicers = _mode_slicers(ctx)
     dirty: dict[Path, Any] = {}
+    states: list[str] = []
+    visuals = 0
     for slicer in slicers:
         visual = slicer.visual
-        if gate_state(_first_visual_gate(visual, slicer.measure), "field", table) != "ok":
+        state = gate_state(_first_visual_gate(visual, slicer.measure), "field", table)
+        if state != "ok":
+            visuals += 1
+            states.append(f"{state:<12} {slicer_mode(visual):<9} -> {slicer.measure:<9} "
+                          f"{visual.page_id}/{visual.folder}")
             _set_visual_gate(visual, table, slicer.measure, alias)
             dirty[visual.path] = visual.data
+    entries = 0
+    bookmarks: dict[Path, Any] = {}
     for bookmark, page_id, cid, container, measure in _mode_captures(ctx, slicers):
         found = _first_bookmark_gate(container, measure)
         if gate_state(found[1] if found else None, "expression", table) != "ok":
+            entries += 1
             _set_bookmark_gate(container, table, measure, _capture_seed(page_id, cid), alias)
-            dirty[bookmark.path] = bookmark.data
+            bookmarks[bookmark.path] = bookmark.data
+    dirty.update(bookmarks)
     gate_measures = _gate_measures(ctx)
+    stale = stale_files = 0
     for path, data in _report_documents(ctx):
-        if _stale_refs(data, gate_measures, table, repair=True):
+        count = _stale_refs(data, gate_measures, table, repair=True)
+        if count:
             dirty[path] = data
-    return [
+    for path, data in _report_documents(ctx):
+        count = _stale_refs(data, gate_measures, table, repair=False)
+        if count:
+            stale += count
+            stale_files += 1
+    changes = [
         (path, f"slicer gates bound to {table!r}")
         for path, data in dirty.items()
         if rewrite_json(path, data)
+    ]
+    ctx.options.setdefault("mode_gate_fixes", []).append({
+        "table": table,
+        "states": states,
+        "visuals": visuals,
+        "entries": entries,
+        "files": len(bookmarks),
+        "stale": stale,
+        "stale files": stale_files,
+        "bookmarks": sorted(bookmarks),
+    })
+    return changes
+
+
+def render_mode_gates_fix(ctx: RuleContext, changes: list[tuple[Path, str]]) -> list[str]:
+    """The per-report block of a mode-gate fix."""
+    blocks = ctx.options.get("mode_gate_fixes") or []
+    if not blocks:
+        return []
+    block = blocks[-1]
+    lines = [f"  gate source entity (from TMDL): {block['table']!r}"]
+    lines += [f"    {state}" for state in block["states"]]
+    for path in block["bookmarks"]:
+        lines.append(f"    patched bookmark {path.name}")
+    return lines
+
+
+def mode_gates_fix_summary(contexts: dict) -> list[str]:
+    """The closing counts of a mode-gate fix."""
+    blocks = []
+    for factory in contexts.values():
+        ctx = factory()
+        blocks += ctx.options.get("mode_gate_fixes") or []
+    if not blocks:
+        return []
+    visuals = sum(b["visuals"] for b in blocks)
+    entries = sum(b["entries"] for b in blocks)
+    files = sum(b["files"] for b in blocks)
+    stale = sum(b["stale"] for b in blocks)
+    stale_files = sum(b["stale files"] for b in blocks)
+    table = blocks[-1]["table"]
+    return [
+        f"  Patched {visuals} visual(s) and {entries} bookmark entrie(s) across "
+        f"{files} file(s)",
+        f"  Patched {stale} stale entity reference(s) -> {table!r} across "
+        f"{stale_files} file(s)",
     ]

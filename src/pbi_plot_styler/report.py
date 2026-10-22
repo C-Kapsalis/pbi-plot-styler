@@ -337,6 +337,21 @@ def current_role_measure_key(visual_data: dict, role: str) -> str | None:
     return None
 
 
+def _measure_keys_of(visual_data: dict, role: str) -> list[str]:
+    """The measure keys a query role projects directly."""
+    keys: list[str] = []
+    for projection in (_query_state(visual_data).get(role) or {}).get(
+        "projections", []
+    ):
+        measure = (projection.get("field") or {}).get("Measure")
+        if not measure:
+            continue
+        entity, prop = _source_entity(measure), measure.get("Property")
+        if entity and prop:
+            keys.append(f"{entity}.{prop}")
+    return keys
+
+
 def role_measure_keys(
     visual_data: dict,
     role: str,
@@ -542,6 +557,13 @@ class VisualChange:
     excluded: tuple[str, ...] = ()
     #: per card: (entries before, entries after).
     counts: tuple[tuple[str, int, int], ...] = ()
+    #: the measures this visual styles (the line set).
+    styled: tuple[str, ...] = ()
+    #: the column-side measures, including the ones the model declares but
+    #: the field parameters do not offer.
+    column_side: tuple[str, ...] = ()
+    #: the no-selector and data-scoped entries the rebuild kept.
+    bar_side: int = 0
 
     @property
     def changed(self) -> bool:
@@ -575,6 +597,33 @@ def dump_visual(
     return text.replace("\n", newline) if newline != "\n" else text
 
 
+def _is_bar_side(entry: Any) -> bool:
+    """A no-selector (the bar render baseline) or data-scoped (per legend
+    value) entry: one the rebuild keeps rather than rewrites."""
+    if not isinstance(entry, dict):
+        return False
+    selector = entry.get("selector")
+    if not isinstance(selector, dict) or not selector:
+        return True
+    return "metadata" not in selector
+
+
+def _bar_side_count(before: list, after: list, *, seed_default: bool) -> int:
+    """The no-selector and data-scoped entries the rebuild kept.
+
+    A no-selector default the base already had is not one of them; only a
+    default the rebuild seeded counts (``seed_default``).
+    """
+    if seed_default:
+        kept = sum(1 for entry in after
+                   if isinstance(entry, dict) and entry.get("selector")
+                   and "metadata" not in entry["selector"])
+        if not any(isinstance(e, dict) and not e.get("selector") for e in before):
+            kept += 1
+        return kept
+    return sum(1 for entry in after if _is_bar_side(entry))
+
+
 def plan_changes(
     report_dir: Path,
     measure_keys: list[str],
@@ -584,6 +633,7 @@ def plan_changes(
     slots: Mapping[str, int] | None = None,
     model: SemanticModel | None = None,
     within: Path | None = None,
+    errors: list[tuple[Path, str]] | None = None,
 ) -> list[VisualChange]:
     """Compute the rewrite for every targeted visual (changed or not).
 
@@ -592,7 +642,8 @@ def plan_changes(
     catalog; ``slots`` fixes each measure's palette slot. With
     ``config.rebind_stale_line`` (which needs ``model``), stale line
     projections are rebound first and the column role counts as column
-    side unless excluded roles are configured.
+    side unless excluded roles are configured. A visual file that does not
+    parse is reported through ``errors`` and left alone.
     """
     roles = config.exclude_current_roles
     if config.rebind_stale_line and not roles:
@@ -607,7 +658,9 @@ def plan_changes(
         old_text = decode(raw)
         try:
             data = json.loads(old_text)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            if errors is not None:
+                errors.append((visual_file, str(exc)))
             continue
         if (data.get("visual") or {}).get("visualType") not in config.visual_types:
             continue
@@ -634,11 +687,19 @@ def plan_changes(
         after_objects = (new_data.get("visual") or {}).get("objects") or {}
         counts = tuple((card, len(before_objects.get(card) or []),
                         len(after_objects.get(card) or [])) for card in ("dataPoint", "labels"))
+        styled = sorted(set(measure_keys) - excluded)
+        column_side = sorted(set(_measure_keys_of(source, config.column_role)) | excluded)
+        bar_side = _bar_side_count(before_objects.get("dataPoint") or [],
+                                   after_objects.get("dataPoint") or [],
+                                   seed_default=False) + _bar_side_count(
+            before_objects.get("labels") or [], after_objects.get("labels") or [],
+            seed_default=True)
         changes.append(
             VisualChange(path=visual_file, old_text=old_text, new_text=new_text,
                          rebinds=tuple(rebinds), bom=raw.startswith(BOM),
                          excluded=tuple(sorted(excluded & set(measure_keys))),
-                         counts=counts)
+                         counts=counts, styled=tuple(styled),
+                         column_side=tuple(column_side), bar_side=bar_side)
         )
     return changes
 

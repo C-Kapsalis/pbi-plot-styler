@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from ..canvas import Bookmark, CategorySection, dig, read_json
-from . import RuleContext
+from . import RuleContext, rule_result_block
 
 _DEPTH_CAP = 64
 _NAVIGATION_EMOJI = ((0x1F300, 0x1FAFF), (0x2600, 0x27BF), (0x1F000, 0x1F02F))
@@ -16,6 +16,12 @@ def _label(bookmark: Bookmark) -> str:
     raw = bookmark.data.get("displayName")
     text = raw if isinstance(raw, str) and raw.strip() else bookmark.name
     return text.strip()
+
+
+def _component(bookmark: Bookmark) -> str:
+    """The name a finding carries: the display name as stored, or the name."""
+    raw = bookmark.data.get("displayName")
+    return raw if isinstance(raw, str) and raw else bookmark.name
 
 
 def _in_ranges(text: str, ranges) -> bool:
@@ -100,10 +106,17 @@ def check_category_filter(ctx: RuleContext) -> None:
     cfg = ctx.settings.category
     scoped = bookmarks_in_scope(ctx)
     ctx.checked["category-filter"] = len(scoped)
+    ctx.details["category-filter"] = {"components": len(scoped)}
     for bookmark in scoped:
         state = bookmark.data.get("explorationState")
         if state is None or not _sets_category(state, cfg):
-            label = _label(bookmark) or bookmark.name
+            label = _component(bookmark)
             ctx.add("CAT001", bookmark.path, label,
-                    f"bookmark {label!r} does not filter {cfg.table}[{cfg.column}]; "
-                    f"applying it switches every slicer gate off")
+                    f"Page-level bookmark has no {cfg.column} filter (Expected: a "
+                    f"filter in byName or byExpr targeting {cfg.table}[{cfg.column}], "
+                    f"Got: no such filter found)")
+
+
+def render_category_filter(findings, counts, framing, values) -> list[str]:
+    """The result block and the failure block of the category-filter rule."""
+    return rule_result_block(3, findings, counts, framing, values)

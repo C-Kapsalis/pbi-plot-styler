@@ -81,6 +81,139 @@
 
 ### Changed
 
+- **`style` prints what the earlier combo-line formatter printed.** A write
+  run prints one line per visual it wrote:
+  `  <visual>: dataPoint <a> -> <b>, labels <c> -> <d> (<n> line measures
+  each; <m> columns-role measure(s) excluded; <k> bar-side entr(y|ies)
+  preserved)`, with the rebind line above it
+  (`  <visual>: Y2 rebound  <entity>.<old>  ->  <entity>.<new>`). A dry run
+  prints the block of every visual that would change
+  (`  <visual>: WOULD CHANGE`, the columns-role line, the `Y2 stale` lines
+  and the `objects.<card>[]` counts) instead of a unified diff. Both end
+  with a blank line, `Models resolved: <n>` and the count
+  (`rebuilt <w>/<t> combo chart(s)<skip> / rebound <r> stale Y2
+  projection(s).`, `All <t> combo chart(s) already in sync.` or
+  `<c>/<t> combo chart(s) need rebuild (re-run without --dry-run).`).
+  A report the run cannot pair with a model prints one
+  `  <visual>: SKIPPED - no paired SemanticModel (missing definition.pbir /
+  no x-Selector measures)` line per combo visual, and the skipped visuals
+  count in `<t>`. The `Report:`, `Model:`, `Measures:` and
+  `  styled <path>` lines are gone, and so is the dry run's diff. A path
+  that does not exist now prints `ERROR: <absolute path> does not exist`
+  (exit `2`) instead of the CLI's usage block, and a `visual.json` that
+  does not parse prints `  ERROR reading <path>: <error>` on stderr and
+  exits `2` instead of being passed over.
+- **`check --summary` prints the compliance report of the earlier
+  report.** The block is `🔍 Template Foundation Rules Comprehensive
+  Report:`, the rule lines (`## Rule #1: Field Parameter f-Slicer Filters
+  ✅ PASS`, `Components: 6/6 passed`), the finding blocks (`**🔴
+  missing_f_slicer_gate** (sx1)`, the description and the `- **Fix**:`
+  line) and the closing `📊 Summary:` counts. The rule 1 count is over the
+  slicer visuals; a bookmark capture never counts against one. The
+  report's marks are written as UTF-8, so they print on a console that is
+  not.
+- **The filter-panel fixer prints its block before it writes**: the
+  `── <report>` header, the `detect <report> (main page=<id>): master=<id>
+  displayName=<name> covers=[...]` line, the `edit edit_master`,
+  `edit edit_parent` and `edit edit_bookmark` steps and the
+  `mv <old folder> -> y_filters_group/` move. A dry run prefixes every
+  step with `[dry-run]` and ends with `(dry-run) re-run without --dry-run
+  to apply.`; a run that changed nothing ends with `Nothing to do (no
+  eligible master groups found, or all already named).`
+- **`bookmarks build --self-test` prints the earlier report's lines**: the
+  generated name, the measures and the matrix row count of the category
+  layout; the funnel (legacy) layout prints `self-test PASS` only.
+- **The foundation rules print their result block.** `category-filter`,
+  `theme` and `filter-panel` print `✅ Rule #3 Validation Results:` with
+  the components checked, the components passed, whether the rule is
+  compliant and the violations found, and then the failure block
+  (`Rule #3 critical violations found:`). A `filter-panel --fix` that
+  leaves no PNL001 prints `Auto-fix SUCCEEDED — y_filters_group master
+  container in place. Commit the modified report files.`
+- **The guidance of the seven foundation ids is the earlier report's
+  text** (the Power BI Desktop steps for the slicer gate and the analysis
+  category, and the one-line fixes for the theme and the panel).
+- **The compliance JSON carries the earlier key names**:
+  `total_rules`, `compliant_rules`, `compliance_percentage`,
+  `critical_violations`, `warning_violations`, `info_violations`,
+  `overall_compliance` and `rules`.
+- **The canvas rules use the earlier wording.** A missing analysis
+  category reads `Page-level bookmark has no Analysis Category filter
+  (Expected: ..., Got: ...)`, the theme findings read `Report missing
+  themeCollection configuration`, `No custom theme defined - may use
+  hardcoded colors`, `<n> hard-coded hex color literal(s) in report.json
+  (sample: ...)` and `Theme collection is incomplete - missing: ...`, the
+  panel reads `No y_filters_group master container found` and
+  `y_filters_group should be a group container, not specific visual`, a
+  missing position reads `1 visual container(s) missing x or y position:
+  <name>` and a y-combo group reads `1 y-combo group(s) violate the
+  y{N}_combo_group naming pattern: <name>`; each rule also prints the
+  aggregate sentence of the earlier report.
+- **`rename-label` prints the counts the earlier script printed**: two
+  spaces, the count right-aligned in three columns, two spaces and the
+  quoted pair, then a blank line, `DRY RUN: <n> file(s)` and the touched
+  paths with four leading spaces, in visiting order (the model's selector
+  tables, then each report's visuals, bookmarks and page files).
+- **The gate rules print their blocks and their counts.** A `slicer-gates`
+  check prints `1/2 visual(s) missing the active gate:` with
+  `<visual>  (<absolute path>)` per visual, then
+  `2 bookmark visualContainer(s) lack the active gate (would erase it on
+  apply):` with `<bookmark file> -> page <page id> vc <container id>` per
+  capture; a clean run prints `All <n> Report slicer(s) carry active
+  `f-Slicer > 0` gates AND all bookmarks restore them faithfully.` A
+  `slicer-gates --fix` prints the source entity
+  (`  <report>: source entity = 'f-Filters'  (declared in
+  <model>/definition/tables/f-Filters.tmdl)`), the
+  `    patched visual <name>` and `    patched bookmark <file>` lines and
+  `Patched <n>/<seen> visual(s) and <n> bookmark file(s).` A report whose
+  model does not declare the gate measure is reported on stderr as
+  `  ERROR (<report>): <reason>` / `    skipping all violating slicers
+  under this report.` and left as it is; the other reports are still
+  fixed. A `slicer-mode-gates` check prints the source entity, the padded
+  state lines (`absent       Basic     -> f-All     p1/s1`) and the
+  `Would patch` totals; its fix prints the `Patched` totals. A
+  `format-selector` check prints `<bad>/<seen> report(s) missing or
+  misconfigured filter:` and the reason (`no report-level filter on
+  z-Selector Format[Selector Format]`, `2 duplicate filters on the same
+  field`, `filter value is <value>, expected "'Format'" - ...`, `filter is
+  not hidden (isHiddenInViewMode != true)`, `filter is not locked
+  (isLockedInViewMode != true)`, `could not parse <path>: <error>`); its
+  fix prints `  <absolute path>: patched (<reason>)` and `Patched
+  <n>/<seen> report(s).` A `stale-placeholders` run prints the per-file
+  `  would repoint   2 in visual <file>: <old>-><new> (<where>)` lines,
+  the `  SKIPPED <file>: <role>: [<axes>] offer [...] — ambiguous` lines
+  and `stale: <n>; skipped <k>` (`repointed:` under `--fix`).
+- **A path that does not exist is reported by the tool**, as
+  `ERROR: <absolute path> does not exist` on stderr (exit `2`), instead
+  of the command-line framework's usage block.
+- **`check --help` describes the four gate rules** with the wording of the
+  earlier gate scripts (the `f-Slicer > 0` gate, the slicer-mode
+  convention, the `z-Selector Format='Format'` filter and the stale
+  blank-dimension binding).
+- **`colors` prints the palette header and the blocks the colour script
+  printed.** Every run opens with
+  `palette   : <picker> -> MOD(order+<offset>, <modulus>)+<base> -> <n> slots`
+  and `registered: <n> measures on the picker`, then a blank line. The
+  multi-series bookmark listing is one block per capture
+  (`  <label>  [<visual id>]`, then `      bar  <key>  order=<n>  <hex>` per
+  column and `      line <key> ...` for the first line, the key padded to 60
+  columns). A visual that uses the picker but cannot carry a per-measure
+  colour prints `UNSUPPORTED: <visual> (<type>) uses <picker>; requires a
+  visual with per-measure colour support`; two series that share a slot
+  print the `COLLISIONS` block; a series the picker does not register prints
+  the `NOT REGISTERED` block. `colors reset` counts the entries it reverts
+  (`would restore <n> colour entry/entries in <f> file(s)`). The per-change
+  lines (`  <vid>: dataPoint for ...`, `  bookmark '<name>': overrides`, the
+  `note: ` lines, `DRY RUN:` and `APPLIED:`) are gone.
+- **The colour errors carry the `FAIL: ` prefix** and the wording of the
+  colour script: `<model>/definition/tables/<table>.tmdl not found`,
+  `[<measure>] not found in <path>`,
+  `could not read the picker/MOD rule out of [<measure>]`,
+  `[<measure>] declares <n> slots for MOD <m>`,
+  `picker table <picker> not found at <path>`,
+  `<picker> parsed to zero entries -- refusing to write`,
+  `cannot resolve the home table of [<name>]` and
+  `unparseable NAMEOF: <row>`. The exit code is `2`, as before.
 - **`colors sync` closes with the original's block.** The summary is
   `would write <f> file(s): <r> colour entry/entries rewritten, <a> added`,
   followed by the changed files (three leading spaces each) and, in a dry
@@ -143,6 +276,9 @@
 
 ### Fixed
 
+- BUGFIX (kept): `rename-label` reads and writes a file that carries a
+  UTF-8 byte-order mark. The earlier script stopped with a traceback on
+  such a file; this one renames the label and keeps the mark.
 - `rename-measure` no longer renames the `queryRef`, `nativeQueryRef` or
   label of a column projection whose column shares the measure's name.
 - `rename-measure` finds and writes names with an apostrophe or a closing
@@ -426,6 +562,16 @@
   that well). Pickers an entry does not mention keep the base bookmark's
   selection on their slicers (never in a well). The legacy layout empties
   unmentioned pickers.
+- A usage error (a missing option, a path that does not exist) is reported
+  by the command-line framework, not by the tool: `Error: Missing option
+  '--report'.` and a usage block. The colour script and the gate scripts
+  printed their own argparse text; reproducing it would mean replacing the
+  parser, so the framework's wording stays. The two commands that name a
+  path of their own (`style` and the gate rules) report a path that does
+  not exist themselves, as `ERROR: <absolute path> does not exist`.
+- STRICTER: `rename-label` on a folder that does not exist is a usage
+  error (exit `2`). The earlier script printed a clean zero, which reads
+  as "nothing to rename" when the folder is a typo.
 
 ## v1.1.0, 2026-10-12
 

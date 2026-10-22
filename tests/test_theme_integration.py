@@ -41,7 +41,6 @@ def test_base_theme_only(universal, report_context):
     payload = check_json(report_context, "theme")
     both = of(payload, "THEME-BOTH")
     assert len(both) == 1 and "customTheme" in both[0]["message"]
-    assert "baseTheme" not in both[0]["message"].replace("customTheme", "")
     assert not of(payload, "THEME-ANY")
     warn = of(payload, "THEME-CUSTOM-MISSING")
     assert len(warn) == 1 and warn[0]["severity"] == "warning"

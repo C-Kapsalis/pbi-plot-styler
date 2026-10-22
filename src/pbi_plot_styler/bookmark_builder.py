@@ -858,18 +858,20 @@ def builder_self_test(report: Path, settings: BuilderSettings, *, base: str | No
         raise BuildError("self-test FAIL: the built bookmark reuses an existing name")
     if legacy:
         matrix = dig(containers, settings.matrix or "", "singleVisual") or {}
-        rows = dig(matrix, "projections", "Rows") or []
         values = dig(matrix, "projections", "Values") or []
+        rows = dig(matrix, "projections", "Rows") or []
         if len(values) != 3 or len(rows) != 1:
             raise BuildError(f"self-test FAIL: matrix holds {len(values)} value(s) and "
                              f"{len(rows)} row(s)")
-        names = [dig(v, "Measure", "Property") for v in values]
-        return ["self-test PASS", f"  generated: {built.name}", f"  measures: {names}",
-                f"  matrix projections.Rows count: {len(rows)}"]
+        return ["self-test PASS"]
     key = next(iter(entry["pickers"]))
     container = containers.get(settings.pickers[key])
     cond = first_in_condition(slicer_filter(container))
     values = [dig(row, 0, "Literal", "Value") for row in (cond or {}).get("Values") or []]
     if values != [_pick_literal(entry["pickers"][key][0])]:
         raise BuildError(f"self-test FAIL: picker {key} holds {values}")
-    return ["self-test PASS"]
+    matrix = dig(containers, settings.matrix or "", "singleVisual") or {}
+    rows = dig(matrix, "projections", "Rows") or []
+    names = [dig(v, "Measure", "Property") for v in dig(matrix, "projections", "Values") or []]
+    return ["self-test PASS", f"  generated: {built.name}", f"  measures: {names}",
+            f"  matrix projections.Rows count: {len(rows)}"]

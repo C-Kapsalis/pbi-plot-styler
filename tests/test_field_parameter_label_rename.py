@@ -83,9 +83,11 @@ def test_a_replacement_that_breaks_json_aborts(client):
 def test_output_lists_counts_first_and_files_in_visiting_order(client):
     result = run("rename-label", client, "--pair", OLD, NEW, "--pair", "Nothing Here", "X")
     lines = result.output.splitlines()
-    assert lines[0] == f'3  "{OLD}" -> "{NEW}"'
-    assert lines[1] == '0  "Nothing Here" -> "X"'
-    files = [ln.strip() for ln in lines if ln.startswith("  ")]
+    assert lines[0] == f'  3  "{OLD}" -> "{NEW}"'
+    assert lines[1] == '  0  "Nothing Here" -> "X"'
+    assert lines[2] == ""
+    assert lines[3].startswith("DRY RUN: ")
+    files = [ln.strip() for ln in lines[4:]]
     assert files[0] == "Growth.SemanticModel/definition/tables/x-Selector 1.tmdl"
     assert files[1:] == sorted(files[1:])
 

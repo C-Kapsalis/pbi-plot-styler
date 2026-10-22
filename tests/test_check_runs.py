@@ -76,7 +76,8 @@ def test_fix_validates_every_report_before_writing_any(tmp_path):
     result = run("check", client, "--rule", "slicer-mode-gates", "--fix")
     assert result.exit_code == 2, result.output
     assert "Finalized/Weekly.Report" in result.output
-    assert "nothing was written" in result.output
+    assert result.output.startswith("!! could not find a table declaring both "
+                                   "[f-Slicer] and [f-All] for ")
     assert _snapshot(client) == before
 
 
@@ -182,7 +183,7 @@ def test_filter_panel_refusal_exits_2_and_writes_nothing(tmp_path):
     before = _snapshot(client)
     result = run("check", client / "-Report.Report", "--rule", "filter-panel", "--fix")
     assert result.exit_code == 2, result.output
-    assert "cannot rename" in result.output
+    assert "REFUSING TO RENAME" in result.output
     assert _snapshot(client) == before
     dry = run("check", client / "-Report.Report", "--rule", "filter-panel", "--fix", "--dry-run")
     assert dry.exit_code == 2, dry.output
@@ -216,12 +217,13 @@ def test_summary_is_not_compliant_while_errors_exist(tmp_path):
     result = run("check", client, "--summary", "--json")
     payload = json.loads(result.output)
     compliance = payload["compliance"]
-    assert compliance["errors"] >= 1
+    assert compliance["critical_violations"] >= 1
     assert compliance["overall_compliance"] is False
     theme = next(r for r in compliance["rules"] if r["rule"] == "theme")
     assert theme["compliant"] is False
     text = run("check", client, "--summary").output
-    assert "**FAIL** `theme`" in text
+    assert "## Rule #6: ThemeDataColor Integration ❌ FAIL" in text
+    assert "**🔴 hardcoded_hex_colors** (report.json)" in text
 
 
 def test_summary_theme_row_counts_only_the_rule_6_checks(tmp_path):
@@ -233,7 +235,8 @@ def test_summary_theme_row_counts_only_the_rule_6_checks(tmp_path):
     assert theme["compliant"] is True
     assert (theme["errors"], theme["warnings"]) == (0, 1)
     assert compliance["overall_compliance"] is True
-    assert (compliance["errors"], compliance["warnings"]) == (0, 1)
+    assert (compliance["critical_violations"],
+            compliance["warning_violations"]) == (0, 1)
     # the both-themes check still runs under --rule theme
     payload = json.loads(run("check", client, "--rule", "theme", "--json").output)
     assert "THM006" in {f["id"] for f in payload["findings"]}

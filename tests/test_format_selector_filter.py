@@ -37,7 +37,7 @@ class TestFormatSelectorFilter:
 
 
 @pytest.mark.parametrize("variant, reason", [
-    ("format-no-filter-config", "no filter"),
+    ("format-no-filter-config", "no report-level filter"),
     ("format-raw", "Format"),
     ("format-unlocked", "lock"),
     ("format-duplicates", "duplicate"),

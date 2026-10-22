@@ -289,6 +289,27 @@ class SemanticModel:
         """The first table (file order) that declares ``measure``."""
         return self.home_table(measure)
 
+    def unparsed_nameofs(self, table: str) -> list[str]:
+        """The text of every ``NAMEOF`` the parser could not read.
+
+        Only the ones that are a tuple member (a comma follows) count: a
+        NAMEOF outside a field-parameter row is not a field-parameter row.
+        """
+        real = self.table_named(table)
+        if real is None:
+            return []
+        source = strip_dax_comments(self.raw_by_table[real])
+        spans = [m.span() for m in _NAMEOF_REF.finditer(source)]
+        out: list[str] = []
+        for match in re.finditer(r"NAMEOF\b", source, re.IGNORECASE):
+            if any(start <= match.start() < end for start, end in spans):
+                continue
+            end = source.find(")", match.end())
+            stop = end + 1 if end != -1 else len(source)
+            if re.compile(r"\s*,").match(source, stop):
+                out.append(source[match.start(): stop])
+        return out
+
     # -- field-parameter scan -------------------------------------------------
     def parameter_catalog(self, table: str) -> list[CatalogEntry]:
         """The measure rows of one field-parameter table, in source order.
