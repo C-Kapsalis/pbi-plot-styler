@@ -52,7 +52,7 @@ def test_orphaned_member(universal, report_context):
     payload = check_json(report_context, "y-combo")
     hits = of(payload, "YCOMBO-orphan")
     assert [h["subject"] for h in hits] == ["y2_values"]
-    assert "<no parent>" in hits[0]["message"]
+    assert "<no parentGroupName>" in hits[0]["message"]
 
 
 def test_report_without_groups_is_skipped(universal, report_context):

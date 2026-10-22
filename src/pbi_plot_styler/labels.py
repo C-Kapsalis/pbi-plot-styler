@@ -51,8 +51,8 @@ def label_files(client_dir: Path, patterns: tuple[str, ...] = ("x-*",)) -> list[
     for report in sorted(p for p in client_dir.rglob("*.Report") if p.is_dir()):
         definition = report / "definition"
         files += sorted(definition.glob("pages/*/visuals/*/visual.json"))
-        files += sorted(definition.glob("pages/*/page.json"))
         files += sorted(definition.glob("bookmarks/*.bookmark.json"))
+        files += sorted(definition.glob("pages/*/page.json"))
     return files
 
 

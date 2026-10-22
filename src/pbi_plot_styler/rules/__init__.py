@@ -118,6 +118,8 @@ class Rule:
     render: Callable[..., list[str]] | None = None
     #: text output of a fix run: ``(ctx, changes) -> lines``.
     render_fix: Callable[..., list[str]] | None = None
+    #: the rule's own lines replace the generic ``fixed`` lines.
+    replace_fix_lines: bool = False
     #: the closing lines of a fix run: ``(contexts) -> lines``.
     fix_summary: Callable[..., list[str]] | None = None
 
@@ -143,25 +145,28 @@ def _registry() -> dict[str, Rule]:
         Rule("slicer-gates", "selector slicers carry an active f-Slicer gate",
              ("GAT001", "GAT002"), gates.check_slicer_gates, gates.fix_slicer_gates,
              critical=("GAT001", "GAT002"), render=gates.render_slicer_gates,
-             render_fix=gates.render_slicer_gates_fix,
+             render_fix=gates.render_slicer_gates_fix, replace_fix_lines=True,
              fix_summary=gates.slicer_gates_fix_summary),
         Rule("slicer-mode-gates", "slicer gates match the slicer mode",
              ("GAT003", "GAT004", "GAT005"), gates.check_mode_gates, gates.fix_mode_gates,
              prepare=gates.gate_host_table, render=gates.render_mode_gates,
-             render_fix=gates.render_mode_gates_fix,
+             render_fix=gates.render_mode_gates_fix, replace_fix_lines=True,
              fix_summary=gates.mode_gates_fix_summary, ordered=True),
         Rule("category-filter", "answer bookmarks set the analysis category",
-             ("CAT001",), category.check_category_filter, critical=("CAT001",)),
+             ("CAT001",), category.check_category_filter, critical=("CAT001",),
+             render=category.render_category_filter),
         Rule("theme", "theme collection present, no hex literals",
              ("THM002", "THM003", "THM004", "THM005", "THM006"), layout.check_theme,
-             critical=("THM002", "THM004"), summary_ids=("THM002", "THM003", "THM004")),
+             critical=("THM002", "THM004"), summary_ids=("THM002", "THM003", "THM004"),
+             render=layout.render_theme),
         Rule("visual-position", "every visual has an x and y position",
-             ("POS001",), layout.check_positions),
+             ("POS001",), layout.check_positions, render=layout.render_positions),
         Rule("y-combo", "y-combo groups are named and parented",
-             ("YCG001", "YCG002"), layout.check_y_combo),
+             ("YCG001", "YCG002"), layout.check_y_combo, render=layout.render_y_combo),
         Rule("filter-panel", "the filter slicers live in the master group",
              ("PNL001", "PNL002"), panel.check_filter_panel, panel.fix_filter_panel,
-             critical=("PNL001",)),
+             critical=("PNL001",), render=panel.render_filter_panel,
+             render_fix=panel.render_filter_panel_fix),
         Rule("format-selector", "a hidden, locked filter selects the Format item",
              ("FMT001",), format_selector.check_format_selector,
              format_selector.fix_format_selector,
@@ -225,6 +230,83 @@ def rewrite_json(path: Path, data: Any, *, ascii_only: bool = False) -> bool:
     return True
 
 
+#: The four foundation rules as the earlier report named them: the rule
+#: number, the rule name and the finding type of each id.
+RULE_REPORT = {
+    "slicer-gates": (1, "Field Parameter f-Slicer Filters"),
+    "category-filter": (3, "Analysis Category Filter Required"),
+    "theme": (6, "ThemeDataColor Integration"),
+    "filter-panel": (8, "y_filters_group Master Container"),
+}
+
+#: finding id -> (type, description, component). A description of ``None``
+#: is taken from the finding's message, without its expected/actual tail.
+FINDING_TYPES = {
+    "GAT001": ("missing_f_slicer_gate",
+                "field-parameter slicer not gated on f-Slicer measure", None),
+    "GAT002": (None, None, None),
+    "CAT001": ("missing_analysis_category",
+                "Page-level bookmark has no Analysis Category filter", None),
+    "THM002": ("missing_theme_collection",
+               "Report missing themeCollection configuration", "report"),
+    "THM003": ("missing_custom_theme",
+               "No custom theme defined - may use hardcoded colors", "report"),
+    "THM004": ("hardcoded_hex_colors", None, "report.json"),
+    "THM005": (None, "Report has no theme configuration. Without a base or custom "
+                     "theme, ThemeDataColor references cannot resolve and visuals "
+                     "fall back to Power BI defaults.", "report"),
+    "THM006": (None, "Theme collection is incomplete - missing: baseTheme, "
+                     "customTheme. Reports must declare both baseTheme and "
+                     "customTheme.", "report"),
+    "PNL001": ("missing_master_container",
+               "No y_filters_group master container found", "report"),
+    "PNL002": ("wrong_container_type",
+               "y_filters_group should be a group container, not specific visual",
+               None),
+}
+
+
+def finding_type(check_id: str) -> tuple[str | None, str | None, str | None]:
+    """``(type, description, component)`` of a finding id."""
+    return FINDING_TYPES.get(check_id, (None, None, None))
+
+
+def rule_result_block(number: int, findings: list, counts: dict, framing, *,
+                      violations: bool = True, failure: bool = True) -> list[str]:
+    """The result block and the failure block of one foundation rule.
+
+    The result block counts the components the rule judged; the failure
+    block lists the error findings, once. The findings themselves keep the
+    lint framing and come first.
+    """
+    checked = counts.get("components", 0)
+    critical = [f for f in findings if f.severity == "error"]
+    passed = max(checked - len({f.location for f in critical}), 0)
+    lines = [framing(f) for f in findings]
+    lines += [
+        f"✅ Rule #{number} Validation Results:",
+        f"   Components checked: {checked}",
+        f"   Components passed: {passed}",
+        f"   Compliant: {not critical}",
+    ]
+    if violations and findings:
+        lines.append("")
+        lines.append("   Violations found:")
+        for finding in findings:
+            icon = "\U0001F534" if finding.severity == "error" else "⚠️"
+            _kind, description, component = finding_type(finding.check_id)
+            if description is None:
+                description = finding.message.split(" (Expected:", 1)[0]
+            if component is None:
+                component = finding.subject
+            lines.append(f"   {icon} {component}: {description}")
+    if critical and failure:
+        lines.append(f"Rule #{number} critical violations found:")
+        for finding in critical:
+            lines.append(f"  - {finding.subject}: {finding.message}")
+    return lines
+
+
 #: One-line remediation per finding id (``--summary`` and its JSON ``fix``).
 FIX_HINTS = {
     "JSN001": "repair or re-save the file so it parses as JSON",
@@ -239,22 +321,33 @@ FIX_HINTS = {
     "FPM001": "give each field parameter its own slot range in the page's visual.json",
     "FPM002": "shrink the slot range to the projections the well holds",
     "THM001": "restore the theme file or remove its reference from report.json",
-    "GAT001": "run check --rule slicer-gates --fix to add the f-Slicer gate filter",
+    "GAT001": ("In Power BI Desktop, select this slicer, open the Filters pane, drag "
+               "the `f-Slicer` measure (from `f-Filters` or `w-Visuals Filters`) into "
+               "'Filters on this visual', and set the condition to >= 1 (or > 0)."),
     "GAT002": "run check --rule slicer-gates --fix, or re-capture the bookmark",
     "GAT003": "run check --rule slicer-mode-gates --fix to write the gate for the slicer's mode",
     "GAT004": "run check --rule slicer-mode-gates --fix to repoint the gate at the declaring table",
     "GAT005": "run check --rule slicer-mode-gates --fix to repoint the stale gate reference",
-    "CAT001": "re-capture the bookmark with the analysis-category filter set",
-    "THM002": "add a theme collection (base and custom theme) to report.json",
-    "THM003": "add a custom theme to the report",
-    "THM004": "replace the hex colour literals in report.json with theme colours",
+    "CAT001": ("In Power BI Desktop, with this bookmark active, set the Analysis Category "
+               "filter on the page (via the z-Map Dimension-Measure Groupings table), "
+               "then UPDATE the bookmark so it captures that state."),
+    "THM002": "Add themeCollection with proper theme references",
+    "THM003": "Define customTheme to avoid hardcoded color values",
+    "THM004": ("Replace each '#RGBHEX' literal in report.json with a ThemeDataColor "
+               "reference so customer rebrand flows through. For values that "
+               "legitimately need to be literal (e.g. image overlays), move them to "
+               "the theme JSON."),
     "THM005": "add a base or custom theme to the report",
     "THM006": "restore the missing theme file",
     "POS001": "give the visual an x and y position in its visual.json",
     "YCG001": "rename the group to y<N>_combo_group",
     "YCG002": "move the member into its y<N>_combo_group",
-    "PNL001": "run check --rule filter-panel --fix to name the master group",
-    "PNL002": "turn y_filters_group into a group visual holding the filter slicers",
+    "PNL001": ("In Power BI Desktop, select every y{N}_combo_group container, right-click "
+               "-> Group, and rename the resulting group's displayName to "
+               "'y_filters_group'. This is the master container that panel-toggle "
+               "bookmarks bind to and that downstream tooling uses to locate the filter "
+               "region."),
+    "PNL002": "Convert to group container for proper hierarchy",
     "FMT001": "run check --rule format-selector --fix to write the Format filter",
     "PLH001": "run check --rule stale-placeholders --fix to repoint the placeholder",
     "ABK000": "set [answer_bookmarks] prefixes to the answer bookmarks' display-name prefixes",

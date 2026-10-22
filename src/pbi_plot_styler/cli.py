@@ -49,7 +49,8 @@ from .colors import reset as color_reset
 from .colors import sync as color_sync
 from .labels import LabelRenameError, rename_labels
 from .rename import count_measure_refs, rename_measure, report_roots
-from .rules import SUMMARY_RULES, UNBASELINABLE, RuleAbort, RuleContext, RuleError, fix_hint, rules
+from .rules import (RULE_REPORT, SUMMARY_RULES, UNBASELINABLE, RuleAbort, RuleContext,
+                    RuleError, finding_type, fix_hint, rules)
 from .rules.answers import load_display_name_filter
 from .tmdl import SemanticModel
 
@@ -861,7 +862,7 @@ def check(
                         fixed += changes
                         if rule.render_fix is not None:
                             fix_lines += rule.render_fix(ctx, changes)
-                        else:
+                        if not rule.replace_fix_lines:
                             fix_lines += [
                                 f"fixed    {p.relative_to(root).as_posix()}: {d}"
                                 for p, d in changes
@@ -989,7 +990,8 @@ def check(
             click.echo(diff, nl=False)
         for p, r in refused:
             click.echo(f"REFUSED  {p.relative_to(root).as_posix()}: {r}")
-        for line in _finding_lines(registry, slugs, new, details, settings, path, fix):
+        for line in _finding_lines(registry, slugs, new, details, settings, path, fix,
+                                   summary):
             click.echo(line)
         by_id: dict[str, list[str]] = {}
         for check_id, location in healed:
@@ -1028,7 +1030,7 @@ def _framing(f: Finding) -> str:
 
 def _finding_lines(registry, slugs, new: list[Finding], details: dict,
                    settings: Settings, check_path: Path | None = None,
-                   fixing: bool = False) -> list[str]:
+                   fixing: bool = False, summary: bool = False) -> list[str]:
     """The text lines of the new findings, grouped per rule in run order.
 
     A rule with its own ``render`` adds its header and summary lines; any
@@ -1045,6 +1047,7 @@ def _finding_lines(registry, slugs, new: list[Finding], details: dict,
         "check_path": str(check_path.resolve()) if check_path else "",
         "check_folder": check_path.name if check_path else "",
         "fixing": "1" if fixing else "",
+        "summary": "1" if summary else "",
     }
     owner: dict[int, str] = {}
     for f in new:
@@ -1187,10 +1190,14 @@ def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> d
         own = [f for f in findings if f.check_id in rule.summarised]
         critical = [f for f in own if f.check_id in rule.critical and f.severity == "error"]
         total = checked.get(slug, 0)
-        failing = len({f.location for f in critical})
+        # the passed count is over the components the original judged: a
+        # bookmark capture never counts against a visual
+        failing = len({f.location for f in critical if f.check_id not in _CAPTURE_ONLY})
         rows.append({
             "rule": slug,
             "title": rule.title,
+            "number": RULE_REPORT[slug][0],
+            "report_name": RULE_REPORT[slug][1],
             "checked": total,
             "passed": max(total - failing, 0),
             # any error finding of the rule breaks compliance, not only the
@@ -1198,38 +1205,96 @@ def _compliance(registry, findings: list[Finding], checked: dict[str, int]) -> d
             "compliant": not any(f.severity == "error" for f in own),
             "errors": sum(f.severity == "error" for f in own),
             "warnings": sum(f.severity == "warning" for f in own),
+            "findings": [_compliance_finding(f) for f in own],
         })
     compliant = sum(r["compliant"] for r in rows)
     return {
         "total_rules": len(rows),
         "compliant_rules": compliant,
         "compliance_percentage": round(100.0 * compliant / len(rows), 1),
-        "errors": sum(r["errors"] for r in rows),
-        "warnings": sum(r["warnings"] for r in rows),
+        "critical_violations": sum(r["errors"] for r in rows),
+        "warning_violations": sum(r["warnings"] for r in rows),
+        "info_violations": 0,
         "overall_compliance": compliant == len(rows)
         and not any(r["errors"] for r in rows),
         "rules": rows,
     }
 
 
+#: ids whose findings are a capture, not a component the rule judged.
+_CAPTURE_ONLY = frozenset({"GAT002"})
+
+
+def _compliance_finding(finding: Finding) -> dict:
+    """One finding of the compliance report: its type, text and fix."""
+    kind, description, component = finding_type(finding.check_id)
+    if description is None and kind is None:
+        description = finding.message
+    elif description is None:
+        description = finding.message.split(" (Expected:", 1)[0]
+    if component is None:
+        component = finding.subject
+    return {
+        "id": finding.check_id,
+        "subject": finding.subject,
+        "severity": finding.severity,
+        "type": kind,
+        "description": description,
+        "component": component,
+        "fix": fix_hint(finding.check_id),
+    }
+
+
 def _compliance_text(compliance: dict, findings: list[Finding]) -> str:
-    lines = ["", "## Foundation rules", ""]
-    registry = rules()
+    """The compliance report of the four foundation rules."""
+    _force_utf8()
+    total = compliance["total_rules"]
+    compliant = compliance["compliant_rules"]
+    score = compliance["compliance_percentage"]
+    critical = compliance["critical_violations"]
+    warnings = compliance["warning_violations"]
+    lines = [
+        "",
+        "\U0001F50D Template Foundation Rules Comprehensive Report:",
+        "=" * 60,
+        "# Template Foundation Rules Validation Report",
+        "",
+        f"**Overall Compliance**: {score}% ({compliant}/{total} rules)",
+        f"**Violations**: {critical} critical, {warnings} warnings",
+        "",
+    ]
     for row in compliance["rules"]:
-        status = "PASS" if row["compliant"] else "FAIL"
-        lines.append(f"- **{status}** `{row['rule']}`: {row['title']} "
-                     f"({row['passed']}/{row['checked']} passed)")
-        for f in findings:
-            if f.check_id in registry[row["rule"]].summarised:
-                lines.append(f"  - {f.severity} {f.check_id} {f.subject}: {f.message}")
-                lines.append(f"    fix: {fix_hint(f.check_id)}")
+        mark = "✅ PASS" if row["compliant"] else "❌ FAIL"
+        lines.append(f"## Rule #{row['number']}: {row['report_name']} {mark}")
+        lines.append(f"Components: {row['passed']}/{row['checked']} passed")
+        lines.append("")
+        for item in row["findings"]:
+            icon = "\U0001F534" if item["severity"] == "error" else "⚠️"
+            kind = item["type"] or item["id"]
+            lines.append(f"**{icon} {kind}** ({item['component']})")
+            lines.append(f"- {item['description']}")
+            if item["fix"]:
+                lines.append(f"- **Fix**: {item['fix']}")
+            lines.append("")
     lines.append("")
-    lines.append(
-        f"Compliance: {compliance['compliant_rules']}/{compliance['total_rules']} "
-        f"rules ({compliance['compliance_percentage']}%), "
-        f"{compliance['errors']} error(s), {compliance['warnings']} warning(s)."
-    )
+    lines.append("\U0001F4CA Summary:")
+    lines.append(f"   Overall Compliance: {compliance['overall_compliance']}")
+    lines.append(f"   Rules Passed: {compliant}/{total}")
+    lines.append(f"   Compliance Score: {score}%")
+    lines.append(f"   Critical Issues: {critical}")
+    lines.append(f"   Warnings: {warnings}")
     return "\n".join(lines)
+
+
+def _force_utf8() -> None:
+    """Let the report's marks print on a console that is not UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (OSError, ValueError):
+                pass
 
 
 # -- colors ----------------------------------------------------------------------
@@ -1399,11 +1464,12 @@ def rename_label(client_dir: Path, pairs, patterns, apply: bool) -> None:
         raise StylerError(str(exc)) from exc
     width = max(len(str(count)) for _, _, count in result.counts)
     for old, new, count in result.counts:
-        click.echo(f'{count:>{width}}  "{old}" -> "{new}"')
+        click.echo(f'  {count:>{width}}  "{old}" -> "{new}"')
+    click.echo()
     verb = "APPLIED" if apply else "DRY RUN"
     click.echo(f"{verb}: {len(result.touched)} file(s)")
     for path in result.touched:
-        click.echo(f"  {path.relative_to(client_dir).as_posix()}")
+        click.echo(f"    {path.relative_to(client_dir).as_posix()}")
 
 
 # -- rename-measure ----------------------------------------------------------------

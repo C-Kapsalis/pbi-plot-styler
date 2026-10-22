@@ -103,6 +103,46 @@
   (exit `2`) instead of the CLI's usage block, and a `visual.json` that
   does not parse prints `  ERROR reading <path>: <error>` on stderr and
   exits `2` instead of being passed over.
+- **`check --summary` prints the compliance report of the earlier
+  report.** The block is `🔍 Template Foundation Rules Comprehensive
+  Report:`, the rule lines (`## Rule #1: Field Parameter f-Slicer Filters
+  ✅ PASS`, `Components: 6/6 passed`), the finding blocks (`**🔴
+  missing_f_slicer_gate** (sx1)`, the description and the `- **Fix**:`
+  line) and the closing `📊 Summary:` counts. The rule 1 count is over the
+  slicer visuals; a bookmark capture never counts against one. The
+  report's marks are written as UTF-8, so they print on a console that is
+  not.
+- **The foundation rules print their result block.** `category-filter`,
+  `theme` and `filter-panel` print `✅ Rule #3 Validation Results:` with
+  the components checked, the components passed, whether the rule is
+  compliant and the violations found, and then the failure block
+  (`Rule #3 critical violations found:`). A `filter-panel --fix` that
+  leaves no PNL001 prints `Auto-fix SUCCEEDED — y_filters_group master
+  container in place. Commit the modified report files.`
+- **The guidance of the seven foundation ids is the earlier report's
+  text** (the Power BI Desktop steps for the slicer gate and the analysis
+  category, and the one-line fixes for the theme and the panel).
+- **The compliance JSON carries the earlier key names**:
+  `total_rules`, `compliant_rules`, `compliance_percentage`,
+  `critical_violations`, `warning_violations`, `info_violations`,
+  `overall_compliance` and `rules`.
+- **The canvas rules use the earlier wording.** A missing analysis
+  category reads `Page-level bookmark has no Analysis Category filter
+  (Expected: ..., Got: ...)`, the theme findings read `Report missing
+  themeCollection configuration`, `No custom theme defined - may use
+  hardcoded colors`, `<n> hard-coded hex color literal(s) in report.json
+  (sample: ...)` and `Theme collection is incomplete - missing: ...`, the
+  panel reads `No y_filters_group master container found` and
+  `y_filters_group should be a group container, not specific visual`, a
+  missing position reads `1 visual container(s) missing x or y position:
+  <name>` and a y-combo group reads `1 y-combo group(s) violate the
+  y{N}_combo_group naming pattern: <name>`; each rule also prints the
+  aggregate sentence of the earlier report.
+- **`rename-label` prints the counts the earlier script printed**: two
+  spaces, the count right-aligned in three columns, two spaces and the
+  quoted pair, then a blank line, `DRY RUN: <n> file(s)` and the touched
+  paths with four leading spaces, in visiting order (the model's selector
+  tables, then each report's visuals, bookmarks and page files).
 - **The gate rules print their blocks and their counts.** A `slicer-gates`
   check prints `1/2 visual(s) missing the active gate:` with
   `<visual>  (<absolute path>)` per visual, then
@@ -225,6 +265,9 @@
 
 ### Fixed
 
+- BUGFIX (kept): `rename-label` reads and writes a file that carries a
+  UTF-8 byte-order mark. The earlier script stopped with a traceback on
+  such a file; this one renames the label and keeps the mark.
 - `rename-measure` no longer renames the `queryRef`, `nativeQueryRef` or
   label of a column projection whose column shares the measure's name.
 - `rename-measure` finds and writes names with an apostrophe or a closing
@@ -515,6 +558,9 @@
   parser, so the framework's wording stays. The two commands that name a
   path of their own (`style` and the gate rules) report a path that does
   not exist themselves, as `ERROR: <absolute path> does not exist`.
+- STRICTER: `rename-label` on a folder that does not exist is a usage
+  error (exit `2`). The earlier script printed a clean zero, which reads
+  as "nothing to rename" when the folder is a typo.
 
 ## v1.1.0, 2026-10-12
 

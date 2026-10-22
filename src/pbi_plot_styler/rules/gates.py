@@ -255,7 +255,7 @@ def render_slicer_gates(findings, counts, framing, values) -> list[str]:
         lines.append(f"{len(captures)} bookmark visualContainer(s) lack the active gate "
                      f"(would erase it on apply):")
         lines += [framing(f) for f in captures]
-    if not findings and seen:
+    if not findings and seen and not values.get("fixing") and not values.get("summary"):
         lines.append(f"All {seen} Report slicer(s) carry active `f-Slicer > 0` gates "
                      f"AND all bookmarks restore them faithfully.")
     return lines
