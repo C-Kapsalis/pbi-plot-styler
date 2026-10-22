@@ -126,3 +126,36 @@ def test_a_sweep_still_skips_a_report_without_a_model(roastery, tmp_path):
     assert result.exit_code == 1, result.output
     assert f"  {COMBO}: SKIPPED - no paired SemanticModel" in result.output
     assert "(1 skipped)" in result.output
+
+
+# -- 4: the slicer-mode-gates fix reports what it wrote ---------------------------
+def _digest(root: Path) -> dict[str, bytes]:
+    return {p.relative_to(root).as_posix(): p.read_bytes()
+            for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_the_mode_gate_fix_counts_the_files_and_references_it_patched(tmp_path):
+    root = tmp_path / "mode-gates"
+    shutil.copytree(FIXTURES / "mode-gates", root)
+    before = _digest(root)
+    result = _run("check", root / "-Canvas.Report", "--rule", "slicer-mode-gates", "--fix")
+    after = _digest(root)
+    changed = sorted(k for k in before if before[k] != after[k])
+    assert len(changed) == 3, changed
+    out = result.stdout
+    # two slicer visuals get their gate; the bookmark keeps its entries but
+    # its two stale gate references are repointed
+    assert "  Patched 2 visual(s) and 0 bookmark entries across 2 file(s)" in out
+    assert "  Patched 2 stale entity reference(s) -> 'f-Filters' across 1 file(s)" in out
+    again = _run("check", root / "-Canvas.Report", "--rule", "slicer-mode-gates", "--fix")
+    assert "  Patched 0 visual(s) and 0 bookmark entries across 0 file(s)" in again.stdout
+    assert ("  Patched 0 stale entity reference(s) -> 'f-Filters' across 0 file(s)"
+            in again.stdout)
+
+
+def test_the_mode_gate_check_spells_entries(tmp_path):
+    root = tmp_path / "mode-gates"
+    shutil.copytree(FIXTURES / "mode-gates", root)
+    out = _run("check", root / "-Canvas.Report", "--rule", "slicer-mode-gates").stdout
+    assert "  Would patch 2 visual(s) and 0 bookmark entries" in out
+    assert "entrie(s)" not in out

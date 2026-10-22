@@ -24,6 +24,17 @@
   that a single report or `--model` keeps the fatal error. A sweep of a
   folder of reports without `--model` still skips such a report with its
   `SKIPPED` lines, as documented.
+- BUGFIX: `check --rule slicer-mode-gates --fix` reports what it wrote.
+  On the mode-gates fixture it printed `Patched 2 visual(s) and 0 bookmark
+  entrie(s) across 0 file(s)` and `Patched 0 stale entity reference(s)`
+  while it rewrote three files: the stale references were counted after
+  they had been repointed, and the file count covered only bookmark files.
+  It now prints `Patched 2 visual(s) and 0 bookmark entries across 2
+  file(s)` (the files the gate pass patched) and `Patched 2 stale entity
+  reference(s) -> 'f-Filters' across 1 file(s)` (the references left after
+  the gate pass, as they are repointed). The check-mode line reads
+  `Would patch <n> visual(s) and <n> bookmark entries` (`1 bookmark
+  entry`) instead of `entrie(s)`.
 
 ## 1.2.1 (2026-10-22)
 

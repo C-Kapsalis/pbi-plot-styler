@@ -526,6 +526,11 @@ def check_mode_gates(ctx: RuleContext) -> None:
     }
 
 
+def _entries(count: int) -> str:
+    """``<n> bookmark entry`` or ``<n> bookmark entries``."""
+    return f"{count} bookmark {'entry' if count == 1 else 'entries'}"
+
+
 def render_mode_gates(findings, counts, framing, values) -> list[str]:
     """The block of a mode-gate check: the source, the findings, the totals."""
     table = counts.get("gate table", "")
@@ -534,7 +539,7 @@ def render_mode_gates(findings, counts, framing, values) -> list[str]:
     lines = [f"  gate source entity (from TMDL): {table!r}"]
     lines += [framing(finding) for finding in findings]
     lines.append(f"  Would patch {counts.get('visuals', 0)} visual(s) and "
-                 f"{counts.get('bookmark entries', 0)} bookmark entrie(s)")
+                 f"{_entries(counts.get('bookmark entries', 0))}")
     lines.append(f"  Would patch {counts.get('stale references', 0)} stale entity "
                  f"reference(s) -> {table!r} across {counts.get('stale files', 0)} file(s)")
     return lines
@@ -565,15 +570,16 @@ def fix_mode_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
             _set_bookmark_gate(container, table, measure, _capture_seed(page_id, cid), alias)
             bookmarks[bookmark.path] = bookmark.data
     dirty.update(bookmarks)
+    #: the files the gate pass patched (slicer visuals and bookmarks).
+    gate_files = len(dirty)
     gate_measures = _gate_measures(ctx)
     stale = stale_files = 0
+    # the stale references left after the gate pass, counted as they are
+    # repointed (counting after the repair always found none)
     for path, data in _report_documents(ctx):
         count = _stale_refs(data, gate_measures, table, repair=True)
         if count:
             dirty[path] = data
-    for path, data in _report_documents(ctx):
-        count = _stale_refs(data, gate_measures, table, repair=False)
-        if count:
             stale += count
             stale_files += 1
     changes = [
@@ -586,7 +592,7 @@ def fix_mode_gates(ctx: RuleContext) -> list[tuple[Path, str]]:
         "states": states,
         "visuals": visuals,
         "entries": entries,
-        "files": len(bookmarks),
+        "files": gate_files,
         "stale": stale,
         "stale files": stale_files,
         "bookmarks": sorted(bookmarks),
@@ -622,7 +628,7 @@ def mode_gates_fix_summary(contexts: dict) -> list[str]:
     stale_files = sum(b["stale files"] for b in blocks)
     table = blocks[-1]["table"]
     return [
-        f"  Patched {visuals} visual(s) and {entries} bookmark entrie(s) across "
+        f"  Patched {visuals} visual(s) and {_entries(entries)} across "
         f"{files} file(s)",
         f"  Patched {stale} stale entity reference(s) -> {table!r} across "
         f"{stale_files} file(s)",
