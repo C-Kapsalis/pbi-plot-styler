@@ -81,6 +81,28 @@
 
 ### Changed
 
+- **`style` prints what the earlier combo-line formatter printed.** A write
+  run prints one line per visual it wrote:
+  `  <visual>: dataPoint <a> -> <b>, labels <c> -> <d> (<n> line measures
+  each; <m> columns-role measure(s) excluded; <k> bar-side entr(y|ies)
+  preserved)`, with the rebind line above it
+  (`  <visual>: Y2 rebound  <entity>.<old>  ->  <entity>.<new>`). A dry run
+  prints the block of every visual that would change
+  (`  <visual>: WOULD CHANGE`, the columns-role line, the `Y2 stale` lines
+  and the `objects.<card>[]` counts) instead of a unified diff. Both end
+  with a blank line, `Models resolved: <n>` and the count
+  (`rebuilt <w>/<t> combo chart(s)<skip> / rebound <r> stale Y2
+  projection(s).`, `All <t> combo chart(s) already in sync.` or
+  `<c>/<t> combo chart(s) need rebuild (re-run without --dry-run).`).
+  A report the run cannot pair with a model prints one
+  `  <visual>: SKIPPED - no paired SemanticModel (missing definition.pbir /
+  no x-Selector measures)` line per combo visual, and the skipped visuals
+  count in `<t>`. The `Report:`, `Model:`, `Measures:` and
+  `  styled <path>` lines are gone, and so is the dry run's diff. A path
+  that does not exist now prints `ERROR: <absolute path> does not exist`
+  (exit `2`) instead of the CLI's usage block, and a `visual.json` that
+  does not parse prints `  ERROR reading <path>: <error>` on stderr and
+  exits `2` instead of being passed over.
 - **`colors sync` closes with the original's block.** The summary is
   `would write <f> file(s): <r> colour entry/entries rewritten, <a> added`,
   followed by the changed files (three leading spaces each) and, in a dry

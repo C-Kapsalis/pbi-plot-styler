@@ -37,7 +37,10 @@ class TestComboLineFormat:
     def test_impose_combo_chart_format(self, universal):
         client_dir = universal
         result = run("style", client_dir, *REFERENCE_OPTIONS)
-        assert result.exit_code == 0, result.output
+        print("\n" + result.output)
+        assert result.exit_code == 0, (
+            f"`pbi-plot-styler style` exited {result.exit_code}.\n"
+            f"stderr:\n{result.stderr}")
 
         visual = json.loads(_combo(client_dir).read_text(encoding="utf-8"))["visual"]
         y2 = visual["query"]["queryState"]["Y2"]["projections"][0]

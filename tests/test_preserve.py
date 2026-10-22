@@ -159,7 +159,7 @@ def test_rerun_is_byte_identical(brewbar_report):
     before = (brewbar_report / COMBO).read_bytes()
     result = CliRunner().invoke(main, [str(brewbar_report), "--exclude-role", "Y", "--dry-run"])
     assert result.exit_code == 0, result.output
-    assert "already styled" in result.output
+    assert "already in sync" in result.output
     assert (brewbar_report / COMBO).read_bytes() == before
 
 

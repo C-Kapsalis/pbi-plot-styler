@@ -98,6 +98,12 @@ def main() -> None:
 
 
 # -- shared helpers ------------------------------------------------------------
+def _abort(message: str) -> None:
+    """Print an error line on stderr and exit with EXIT_ERROR."""
+    click.echo(message, err=True)
+    sys.exit(EXIT_ERROR)
+
+
 def _discover(path: Path):
     discovery = discover_reports(path)
     for skipped, reason in discovery.skipped:
@@ -128,7 +134,7 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
 @main.command(DEFAULT_COMMAND)
 @click.argument(
     "report_dir",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(path_type=Path),
 )
 @click.option(
     "--model",
@@ -304,6 +310,8 @@ def style(
     deterministically and idempotently, keeping every other formatting
     entry intact.
     """
+    if not report_dir.exists():
+        _abort(f"ERROR: {report_dir.resolve()} does not exist")
     if config_path is None:
         default_config = Path.cwd() / DEFAULT_CONFIG_FILENAME
         if default_config.is_file():
@@ -358,31 +366,36 @@ def style(
                 f"{report_dir} is not inside a *.Report folder. Pass a report "
                 f"folder, a folder of reports, a page folder or a visual.json.")
         within, report_dir = report_dir.resolve(), enclosing
-    discovery = _discover(report_dir)
+    discovery = discover_reports(report_dir)
+    if not discovery.reports:
+        raise StylerError(
+            f"no *.Report folders found under {report_dir}. Pass a PBIP report "
+            f"folder (one containing definition.pbir and definition/pages), "
+            f"or a folder that contains one or more of them."
+        )
     root = report_dir
     models: dict[Path, SemanticModel] = {}
     changes: list[VisualChange] = []
     all_keys: set[str] = set()
-    # In a sweep of several reports with no --model, a report that cannot be
-    # paired with a model (or whose model styles nothing) is skipped; a
-    # single named report keeps the fatal error.
+    #: the combo visuals of a report the run could not pair with a model.
+    skipped_visuals: list[str] = []
+    #: visual files that do not parse: (path, the JSON error).
+    unreadable: list[tuple[Path, str]] = []
+    # A report that cannot be paired with a model is skipped; a report whose
+    # model has no usable field parameters is an error unless the run sweeps
+    # several reports and no --model was named.
     lenient = not discovery.single and model_dir is None
-    skipped_reports: list[tuple[Path, str]] = []
-
-    def skip_or_fail(report: Path, reason: str) -> None:
-        if not lenient:
-            raise StylerError(reason)
-        skipped_reports.append((report, reason))
-        click.echo(f"Skipped:  {report.relative_to(root).as_posix()} ({reason})")
 
     for report in discovery.reports:
-        if not discovery.single:
-            click.echo(f"Report:   {report.relative_to(root).as_posix()}")
         try:
             resolved_model = (model_dir or resolve_model_dir(report)).resolve()
             if resolved_model not in models:
                 models[resolved_model] = SemanticModel.load(resolved_model)
             model = models[resolved_model]
+        except (FileNotFoundError, LookupError, OSError, ValueError):
+            skipped_visuals += _combo_visuals(report, config.visual_types)
+            continue
+        try:
             detected = detect_field_parameters(model.raw_by_table,
                                                model.measures_by_table)
             if explicit_tables:
@@ -390,7 +403,6 @@ def style(
                 # original
                 tables = _expand_tables(config.field_parameter_tables, model)
                 field_parameters = tables
-                click.echo(f"Field parameters: {', '.join(tables)} (explicit)")
             else:
                 # no explicit list: the model's own field parameters are
                 # detected from its TMDL. The measures the styling drives
@@ -409,23 +421,24 @@ def style(
                            if detected.metric or detected.mixed else ""))
             measure_keys = model.field_parameter_measures(tables) if tables else []
         except (FileNotFoundError, LookupError, OSError, ValueError) as exc:
-            skip_or_fail(report, str(exc))
+            if not lenient:
+                raise StylerError(str(exc)) from exc
+            skipped_visuals += _combo_visuals(report, config.visual_types)
             continue
 
         if not measure_keys:
-            skip_or_fail(report,
-                f"no measures resolved from field-parameter tables "
-                f"{list(config.field_parameter_tables)} in {resolved_model}, "
-                f"so there is nothing to style. The tables exist, but none "
-                f"of their NAMEOF references match a measure declared in the "
-                f"model. Check that the configured tables reference "
-                f"measures, not only columns."
-            )
+            if not lenient:
+                raise StylerError(
+                    f"no measures resolved from field-parameter tables "
+                    f"{list(config.field_parameter_tables)} in {resolved_model}, "
+                    f"so there is nothing to style. The tables exist, but none "
+                    f"of their NAMEOF references match a measure declared in the "
+                    f"model. Check that the configured tables reference "
+                    f"measures, not only columns."
+                )
+            skipped_visuals += _combo_visuals(report, config.visual_types)
             continue
         all_keys.update(k.lower() for k in measure_keys)
-
-        click.echo(f"Model:    {resolved_model}")
-        click.echo(f"Measures: {len(measure_keys)} drive the styling")
 
         # every field parameter of the model can bind an excluded role
         # (v1.1.0 behaviour), not only the configured or matched tables
@@ -443,6 +456,7 @@ def style(
                     slots=model.palette_slots(tables),
                     model=model,
                     within=within,
+                    errors=unreadable,
                 )
             )
         except FileNotFoundError as exc:
@@ -461,7 +475,10 @@ def style(
             f"as the model declares it."
         )
 
-    if not changes:
+    for path, reason in unreadable:
+        click.echo(f"  ERROR reading {path}: {reason}", err=True)
+
+    if not changes and not skipped_visuals and not unreadable:
         raise StylerError(
             f"no targeted visuals found in {len(discovery.reports)} "
             f"report(s) under {root}: no visual has a visualType in "
@@ -470,43 +487,92 @@ def style(
         )
 
     pending = [c for c in changes if c.changed]
-    verb = "would rebind" if dry_run else "rebound"
-    for change in changes:
-        for rb in change.rebinds:
-            click.echo(
-                f"  {verb} {change.path.relative_to(root).as_posix()}: "
-                f"{rb.entity}[{rb.old}] -> [{rb.new}]"
-            )
-    rebinds = sum(len(c.rebinds) for c in changes)
-    totals = f"{rebinds} rebind(s), {len(skipped_reports)} skipped"
+    for name in skipped_visuals:
+        click.echo(f"  {name}: SKIPPED - no paired SemanticModel "
+                   f"(missing definition.pbir / no x-Selector measures)")
     if dry_run:
         for change in pending:
-            click.echo()
-            click.echo(change.unified_diff(root), nl=False)
-        for change in pending:
-            click.echo(_visual_detail(change, root, "would style"))
-        click.echo(
-            f"\n{len(pending)}/{len(changes)} visual(s) would change."
-            if pending
-            else f"\nAll {len(changes)} visual(s) already styled."
-        )
-        click.echo(f"Totals: {totals}.")
+            _dry_run_block(change)
     else:
+        for change in changes:
+            for rb in change.rebinds:
+                click.echo(f"  {change.path.parent.name}: Y2 rebound  "
+                           f"{rb.entity!r}.{rb.old!r}  ->  {rb.entity!r}.{rb.new!r}")
         written = apply_changes(changes)
         for change in pending:
-            click.echo(_visual_detail(change, root, "styled"))
-        click.echo(
-            f"\nRestyled {written}/{len(changes)} visual(s); "
-            f"{len(changes) - written} already styled."
-        )
-        click.echo(f"Totals: {totals}.")
+            click.echo(_result_line(change))
+    rebinds = sum(len(c.rebinds) for c in changes)
+    total = len(changes) + len(skipped_visuals) + len(unreadable)
+    skip_note = f" ({len(skipped_visuals) + len(unreadable)} skipped)" if (
+        skipped_visuals or unreadable) else ""
+    click.echo()
+    click.echo(f"Models resolved: {len(models)}")
+    if dry_run:
+        if pending or unreadable:
+            click.echo(f"{len(pending)}/{total} combo chart(s) need rebuild{skip_note} "
+                       f"(re-run without --dry-run).")
+        else:
+            click.echo(f"All {total} combo chart(s) already in sync{skip_note}.")
+    else:
+        line = f"rebuilt {written}/{total} combo chart(s){skip_note}"
+        if rebinds:
+            line += f" / rebound {rebinds} stale Y2 projection(s)"
+        click.echo(line + ".")
 
     if zip_path is not None:
         write_zip(discovery.reports, changes, zip_path, base=root.parent)
         click.echo(f"Wrote {zip_path}")
 
-    if dry_run and pending:
+    if unreadable and not dry_run:
+        sys.exit(EXIT_ERROR)
+    if dry_run and (pending or unreadable):
         sys.exit(EXIT_DRIFT)
+
+
+def _combo_visuals(report: Path, visual_types: tuple[str, ...]) -> list[str]:
+    """The names of a report's visuals of the targeted types, in path order."""
+    names: list[str] = []
+    pages = report / "definition" / "pages"
+    if not pages.is_dir():
+        return names
+    for path in sorted(pages.rglob("visual.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if (data.get("visual") or {}).get("visualType") in visual_types:
+            names.append(path.parent.name)
+    return names
+
+
+def _result_line(change: VisualChange) -> str:
+    """The per-visual result line of a written visual."""
+    counts = dict((card, (before, after)) for card, before, after in change.counts)
+    dp_before, dp_after = counts.get("dataPoint", (0, 0))
+    lb_before, lb_after = counts.get("labels", (0, 0))
+    line = len(change.styled)
+    excluded = len(change.excluded)
+    entries = "entry" if change.bar_side == 1 else "entries"
+    return (f"  {change.path.parent.name}: dataPoint {dp_before} -> {dp_after}, "
+            f"labels {lb_before} -> {lb_after} ({line} line measures each; "
+            f"{excluded} columns-role measure(s) excluded; "
+            f"{change.bar_side} bar-side {entries} preserved)")
+
+
+def _dry_run_block(change: VisualChange) -> None:
+    """The per-visual block of a dry run."""
+    click.echo(f"  {change.path.parent.name}: WOULD CHANGE")
+    if change.column_side:
+        click.echo("    columns-role measure(s) kept OUT of the line set: "
+                   + ", ".join(change.column_side))
+    for rb in change.rebinds:
+        click.echo(f"    Y2 stale: {rb.entity!r}.{rb.old!r} -> "
+                   f"would rebind to {rb.new!r}")
+    counts = dict((card, (before, after)) for card, before, after in change.counts)
+    for card in ("dataPoint", "labels"):
+        before, after = counts.get(card, (0, 0))
+        if before != after:
+            click.echo(f"    objects.{card}[]: {before} -> {after} entries")
 
 
 def _expand_tables(names: tuple[str, ...], model: SemanticModel) -> tuple[str, ...]:
@@ -526,14 +592,6 @@ def _expand_tables(names: tuple[str, ...], model: SemanticModel) -> tuple[str, .
             matched = [name]
         out += [t for t in matched if t not in out]
     return tuple(out)
-
-
-def _visual_detail(change: VisualChange, root: Path, verb: str) -> str:
-    counts = ", ".join(f"{card} {before} -> {after}" for card, before, after in change.counts)
-    line = f"  {verb} {change.path.relative_to(root).as_posix()}: {counts}"
-    if change.excluded:
-        line += f"; column side, not styled: {', '.join(change.excluded)}"
-    return line
 
 
 # -- check ---------------------------------------------------------------------

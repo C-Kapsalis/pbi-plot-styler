@@ -35,7 +35,7 @@ def _snapshot(report_dir: Path) -> dict[str, str]:
 def test_apply_styles_every_combo_chart(report_dir):
     result = _run(report_dir)
     assert result.exit_code == 0, result.output
-    assert "Restyled 2/2 visual(s)" in result.output
+    assert "rebuilt 2/2 combo chart(s)." in result.output
 
     for page, visual in (
         ("monthlyperformance", "combo01"),
@@ -54,7 +54,7 @@ def test_apply_is_idempotent(report_dir):
     before = _snapshot(report_dir)
     second = _run(report_dir)
     assert second.exit_code == 0
-    assert "Restyled 0/2 visual(s); 2 already styled" in second.output
+    assert "rebuilt 0/2 combo chart(s)." in second.output
     assert _snapshot(report_dir) == before
 
 
@@ -70,17 +70,17 @@ def test_dry_run_leaves_files_untouched_and_exits_1(report_dir):
     result = _run(report_dir, "--dry-run")
     assert result.exit_code == 1
     assert _snapshot(report_dir) == before
-    # A unified diff of the pending rewrite is shown.
-    assert "--- definition/pages/monthlyperformance/visuals/combo01/visual.json" in result.output
-    assert "+++ definition/pages/monthlyperformance/visuals/combo01/visual.json (styled)" in result.output
-    assert "2/2 visual(s) would change." in result.output
+    # the per-visual block of every visual that would change
+    assert "  combo01: WOULD CHANGE" in result.output
+    assert "    objects.dataPoint[]: 1 -> 5 entries" in result.output
+    assert "2/2 combo chart(s) need rebuild (re-run without --dry-run)." in result.output
 
 
 def test_dry_run_after_apply_exits_0(report_dir):
     assert _run(report_dir).exit_code == 0
     result = _run(report_dir, "--dry-run")
     assert result.exit_code == 0
-    assert "All 2 visual(s) already styled." in result.output
+    assert "All 2 combo chart(s) already in sync." in result.output
 
 
 # -- CLI flag overrides ----------------------------------------------------------
@@ -182,7 +182,7 @@ def test_exclude_role_still_idempotent(report_dir):
     _run(report_dir, "--exclude-role", "Y")
     result = _run(report_dir, "--exclude-role", "Y", "--dry-run")
     assert result.exit_code == 0, result.output
-    assert "already styled" in result.output
+    assert "already in sync" in result.output
 
 
 def test_exclude_role_unknown_role_is_a_no_op(report_dir):
@@ -215,7 +215,7 @@ def test_rename_table_overrides_one_slot(project, report_dir):
 
     result = _run(report_dir, "--rename-table", "y-Plot Specific=Set Lines")
     assert result.exit_code == 0, result.output
-    assert "Measures: 5 drive the styling" in result.output
+    assert "rebuilt 2/2 combo chart(s)." in result.output
 
 
 def test_rename_table_unknown_name_exits_2(report_dir):
@@ -246,7 +246,7 @@ def test_rename_table_via_config_file(project, report_dir, tmp_path):
 
     result = _run(report_dir, "--config", config_file)
     assert result.exit_code == 0, result.output
-    assert "Measures: 5 drive the styling" in result.output
+    assert "rebuilt 2/2 combo chart(s)." in result.output
 
 
 # -- config file -----------------------------------------------------------------
@@ -488,10 +488,8 @@ def test_directory_of_reports_styles_each_with_its_own_model(tmp_path, project, 
 
     result = _run(root, "--dry-run")
     assert result.exit_code == 1, result.output
-    assert "Report:   nested/brewbar/Brewbar.Report" in result.output
-    assert "Report:   roastery/Roastery.Report" in result.output
-    assert result.output.count("Model:") == 2
-    assert "3/3 visual(s) would change." in result.output
+    assert result.output.count("Models resolved:") == 1
+    assert "3/3 combo chart(s) need rebuild (re-run without --dry-run)." in result.output
 
     assert _run(root).exit_code == 0
     styled = _visual(root / "roastery" / "Roastery.Report", "monthlyperformance", "combo01")
@@ -516,4 +514,4 @@ def test_zero_targeted_visuals_exits_2(report_dir):
 def test_explicit_style_subcommand_matches_default(report_dir):
     result = _run("style", report_dir, "--dry-run")
     assert result.exit_code == 1
-    assert "2/2 visual(s) would change." in result.output
+    assert "2/2 combo chart(s) need rebuild (re-run without --dry-run)." in result.output
