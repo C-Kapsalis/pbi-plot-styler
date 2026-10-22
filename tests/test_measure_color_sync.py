@@ -232,7 +232,7 @@ def test_existing_bookmark_overrides_are_completed_and_recoloured(shop):
     _with_overrides(shop)
     result = run("colors", "sync", *_args(shop), "--apply")
     assert result.exit_code == EXIT_CHANGES, result.output
-    assert "overrides" in result.output
+    assert "wrote 2 file(s)" in result.output
     entries = _overrides(shop)
     assert _fill(entries["Sales Measures.Revenue"]) == {"Literal": {"Value": "'#222222'"}}
     # unregistered entries keep their colour; the missing needed measure is added
@@ -248,7 +248,7 @@ def test_a_dry_run_leaves_bookmark_overrides_alone(shop):
     before = _snapshot(shop)
     result = run("colors", "sync", *_args(shop))
     assert result.exit_code == EXIT_PENDING, result.output
-    assert "overrides" in result.output
+    assert "would write 2 file(s)" in result.output
     assert _snapshot(shop) == before
 
 
@@ -323,7 +323,7 @@ def test_reset_reverts_bookmark_overrides(shop):
     assert run("colors", "sync", *_args(shop), "--apply").exit_code == EXIT_CHANGES
     result = run("colors", "reset", *_args(shop), "--apply")
     assert result.exit_code == EXIT_CHANGES, result.output
-    assert "overrides reverted" in result.output
+    assert "restored " in result.output
     section = _bookmark_section(load(_bookmark_path(shop)))
     combo = section["visualContainers"]["combo01"]["singleVisual"]["objects"]["merge"]["dataPoint"]
     fills = {e["selector"]["metadata"]: _fill(e) for e in combo}
@@ -333,7 +333,7 @@ def test_reset_reverts_bookmark_overrides(shop):
     assert "columnFormatting" not in section["visualContainers"]["matrix01"]["singleVisual"]["objects"]["merge"]
     before = _snapshot(shop)
     again = run("colors", "reset", *_args(shop), "--apply")
-    assert again.exit_code == EXIT_NONE and "0 file(s) written" in again.output
+    assert again.exit_code == EXIT_NONE and "restored 0 colour entry/entries in 0 file(s)" in again.output
     assert _snapshot(shop) == before
 
 
@@ -378,7 +378,7 @@ def test_only_a_value_role_makes_a_visual_use_the_picker(shop):
     assert "matrix02" not in result.output
     assert "objects" not in _visual(shop, "matrix02")["visual"]
     noted = run("colors", "sync", *_args(shop), "--visual-type", "card")
-    assert "card01: card uses 'x-Selector 1' but is not supported" in noted.output
+    assert "UNSUPPORTED" not in noted.output
     assert "slicer01" not in noted.output
 
 
@@ -417,10 +417,13 @@ def test_reset_loads_the_picker_registry(shop):
 def test_sync_prints_palette_series_and_counts(shop):
     result = run("colors", "sync", *_args(shop))
     out = result.output
-    assert "palette: picker 'x-Selector 1', offset 0, modulus 3, 3 slot(s); 2 registered measure(s)" in out
-    assert "bookmark 'Sales | Both' on combo01:" in out
-    assert "Y      Sales Measures.Revenue: order 1, colour #222222" in out
-    assert "Y      Sales Measures.Orders: order 2, colour #333333" in out
+    assert "palette   : x-Selector 1 -> MOD(order+0, 3)+1 -> 3 slots" in out
+    assert "registered: 2 measures on the picker" in out
+    assert "  Sales | Both  [combo01]" in out
+    assert "bar  Sales Measures.Revenue" in out
+    assert "order=1" in out and "#222222" in out
+    assert "bar  Sales Measures.Orders" in out
+    assert "order=2" in out and "#333333" in out
     assert "would write" in out and "0 colour entry/entries rewritten, 2 added" in out
 
 
@@ -431,15 +434,18 @@ def test_line_series_count_in_collisions_and_a_hint_is_printed(shop):
                                                     "Property": "Basket Size"}}]
     _edit_bookmark(shop, with_line)
     out = run("colors", "sync", *_args(shop)).output
-    assert "Y2     Sales Measures.Basket Size: not registered" in out
-    assert "Sales Measures.Basket Size is not a row of 'x-Selector 1'" in out
+    assert "line Sales Measures.Basket Size" in out
+    assert "-- NOT on the picker, no colour" in out
+    assert "NOT REGISTERED on the picker (blank in the matrix too):" in out
+    assert "  Sales | Both: Sales Measures.Basket Size" in out
 
     palette = shop / "Shop.SemanticModel" / "definition" / "tables" / "w-Colors.tmdl"
     palette.write_text(palette.read_text(encoding="utf-8").replace('"#333333"', '"#222222"'),
                        encoding="utf-8")
     out = run("colors", "sync", *_args(shop)).output
-    assert "share colour #222222" in out
-    assert "hint: re-space" in out
+    assert "COLLISIONS -- two series in one bookmark share a slot:" in out
+    assert "  Sales | Both: Sales Measures.Revenue  ==  Sales Measures.Orders  (#222222)" in out
+    assert "Fix by re-spacing the picker Order" in out
 
 
 @pytest.mark.parametrize("vtype", ["columnChart", "barChart"])

@@ -1187,7 +1187,7 @@ EXIT_INVALID = 2
 
 @main.group("colors")
 def colors() -> None:
-    """Stamp each measure's palette colour from the model's palette measure."""
+    """Synchronize measure colours across field-parameter columns and tables."""
 
 
 def _color_options(func):
@@ -1204,7 +1204,7 @@ def _color_options(func):
     func = click.option("--palette-table", default="w-Colors", show_default=True,
                         help="The table searched first for the palette measure.")(func)
     func = click.option("--default-color-id", type=int, default=9, show_default=True,
-                        help="Theme data colour that reset reverts chart fills to.")(func)
+                        help="ThemeDataColor ColorId used by reset (default: 9)")(func)
     return func
 
 
@@ -1214,14 +1214,18 @@ def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
         model = model_dir or resolve_model_dir(report_dir)
         result = action(report_dir, model, opts, apply)
     except (PaletteError, FileNotFoundError, json.JSONDecodeError) as exc:
-        click.echo(f"Error: {exc}", err=True)
+        click.echo(f"FAIL: {exc}", err=True)
         sys.exit(EXIT_INVALID)
-    for line in result.info:
+    for line in result.header:
         click.echo(line)
-    for note in result.notes:
-        click.echo(f"note: {note}")
-    for change in result.changes:
-        click.echo(f"  {change}")
+    for line in result.listing:
+        click.echo(line)
+    for line in result.unsupported:
+        click.echo(line)
+    for line in result.collisions:
+        click.echo(line)
+    for line in result.unregistered:
+        click.echo(line)
     if action is color_sync:
         verb = "wrote" if apply else "would write"
         click.echo(f"{verb} {len(result.changed)} file(s): "
@@ -1232,10 +1236,15 @@ def _run_colors(action, report_dir: Path, model_dir: Path | None, apply: bool,
         if not apply and result.changed:
             click.echo("")
             click.echo("(dry run -- pass --apply to write)")
-    elif apply:
-        click.echo(f"APPLIED: {len(result.written)} file(s) written.")
     else:
-        click.echo(f"DRY RUN: {len(result.changes)} change(s); rerun with --apply to write.")
+        verb = "restored" if apply else "would restore"
+        click.echo(f"{verb} {result.restored} colour entry/entries in "
+                   f"{len(result.changed)} file(s)")
+        for path in _sorted_changed(result.changed):
+            click.echo(f"   {_shown_path(report_dir, path)}")
+        if not apply and result.changed:
+            click.echo("")
+            click.echo("(dry run -- pass --apply to write)")
     pending = bool(result.changes) and not apply
     sys.exit(EXIT_COLORS_PENDING if pending else EXIT_OK)
 
@@ -1263,15 +1272,27 @@ def _shown_path(report_dir: Path, path: Path) -> str:
 @colors.command("sync")
 @_color_options
 @click.option("--visual-type", "visual_types", multiple=True,
-              help="Visual type to stamp (repeatable). Default: bar, line, combo "
-              "charts and matrices.")
+              help="limit changes to these visual types, e.g. pivotTable")
 @click.option("--min-series", type=int, default=2, show_default=True,
-              help="A bookmark capture with this many Y measures is multi-series.")
+              help="only report bookmarks pinning at least this many bars")
 @click.option("--all-visuals", is_flag=True,
-              help="Stamp every supported visual, not only the ones in scope.")
+              help="include every chart/table, beyond picker matrices and bookmarked multi-series charts")
 def colors_sync(report_dir, model_dir, apply, measure, palette_table, default_color_id,
                 visual_types, min_series, all_visuals) -> None:
-    """Colour each measure from its palette slot (dry run unless --apply).
+    """Synchronize measure colours across field-parameter columns and tables.
+
+    USE THIS WHEN measure colours drifted across visuals or a new measure was
+    registered — "re-stamp bar colours from c-Measure Color". Run
+    `pbi-plot-styler style` after it.
+
+    Read the picker and palette from [c-Measure Color] in w-Colors.tmdl. Stamp
+    identity-keyed column-series fills and matrix value/header colours
+    for every registered measure, including measures selected by future bookmarks.
+    Process bookmark formatting overrides as well as base visual formatting.
+
+    Default scope: all matrices using the palette's picker in a value role, plus
+    charts with bookmarked multi-measure selections. --all-visuals includes every
+    supported chart/table. Other visual types are outside this command's current scope.
 
     Exits 0 when the changes were written or none are needed, 1 when a dry
     run found changes to make, 2 on invalid input.
@@ -1279,7 +1300,8 @@ def colors_sync(report_dir, model_dir, apply, measure, palette_table, default_co
     opts = ColorOptions(measure=measure, host_table=palette_table,
                         default_color_id=default_color_id,
                         visual_types=tuple(visual_types) or ColorOptions().visual_types,
-                        min_series=min_series, all_visuals=all_visuals)
+                        min_series=min_series, all_visuals=all_visuals,
+                        filter_types=bool(visual_types))
     _run_colors(color_sync, report_dir, model_dir, apply, opts)
 
 
@@ -1292,12 +1314,12 @@ def colors_reset(report_dir, model_dir, apply, measure, palette_table,
                  default_color_id, visual_types) -> None:
     """Revert palette colours written by sync (dry run unless --apply).
 
-    Only the picker's registered measures are reverted, on visuals and on
-    bookmark overrides.
+    undo this command's literal colours: restore chart series to the report theme and remove matrix overrides
     """
     opts = ColorOptions(measure=measure, host_table=palette_table,
                         default_color_id=default_color_id,
-                        visual_types=tuple(visual_types) or ColorOptions().visual_types)
+                        visual_types=tuple(visual_types) or ColorOptions().visual_types,
+                        filter_types=bool(visual_types))
     _run_colors(color_reset, report_dir, model_dir, apply, opts)
 
 

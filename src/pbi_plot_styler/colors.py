@@ -41,7 +41,7 @@ _TABLE_OWNED = ("fontColor", "styleValues", "styleHeader", "styleTotal")
 
 
 class PaletteError(ValueError):
-    """The palette measure or its picker cannot be read (exit 3)."""
+    """The palette measure or its picker cannot be read (exit 2)."""
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,11 @@ class Palette:
     def colours(self) -> set[str]:
         return {c.lower() for c in self.slots.values()}
 
+    def rule(self) -> str:
+        """The MOD rule as the model spells it: ``MOD(order+0, 2)+1``."""
+        sign = "+" if self.offset >= 0 else "-"
+        return f"MOD(order{sign}{abs(self.offset)}, {self.modulus})+{self.base}"
+
 
 _DECL = r"^(?P<indent>[ \t]+)measure\s+(?:'{q}'|\"{d}\"|{b})\s*="
 _NEXT_OBJECT = re.compile(r"^[ \t]+(?:measure|partition|column)\b", re.MULTILINE)
@@ -73,7 +78,12 @@ _ORDER_TERM = re.compile(r"[A-Za-z_][\w.]*(?:\s*([+-])\s*(\d+))?")
 _SLOT = re.compile(r"(\d+)\s*,\s*\"(#[0-9A-Fa-f]{6})\"")
 
 
-def _measure_body(model: SemanticModel, measure: str, host: str) -> str:
+def _measure_body(model: SemanticModel, measure: str, host: str) -> tuple[str, Path]:
+    """The body of the palette measure and the file that declares it.
+
+    The host table is searched first; the measure may also live in another
+    table (the tool reads it there too).
+    """
     tables = sorted(model.raw_by_table, key=lambda t: t != host)
     escaped = re.escape(measure)
     decl = re.compile(
@@ -84,18 +94,23 @@ def _measure_body(model: SemanticModel, measure: str, host: str) -> str:
         match = decl.search(text)
         if match:
             following = _NEXT_OBJECT.search(text, match.end())
-            return text[match.start(): following.start() if following else len(text)]
-    raise PaletteError(f"no table declares the palette measure [{measure}]")
+            body = text[match.start(): following.start() if following else len(text)]
+            return body, model.definition_dir / "tables" / f"{table}.tmdl"
+    host_file = model.definition_dir / "tables" / f"{host}.tmdl"
+    if not host_file.is_file():
+        raise PaletteError(f"{host_file} not found")
+    raise PaletteError(f"[{measure}] not found in {host_file}")
 
 
 def parse_palette(model: SemanticModel, measure: str, host: str) -> Palette:
-    body = strip_dax_comments(_measure_body(model, measure, host))
+    body, _ = _measure_body(model, measure, host)
+    body = strip_dax_comments(body)
     picker = _PICKER.search(body)
     if not picker:
-        raise PaletteError(f"[{measure}] has no SELECTEDVALUE('<picker>'[...]) call")
+        raise PaletteError(f"could not read the picker/MOD rule out of [{measure}]")
     mod = _MOD.search(body)
     if not mod:
-        raise PaletteError(f"[{measure}] has no MOD(<order> + offset, modulus) + base")
+        raise PaletteError(f"could not read the picker/MOD rule out of [{measure}]")
     term = _ORDER_TERM.fullmatch(mod.group(1).strip())
     if not term:
         raise PaletteError(
@@ -108,9 +123,7 @@ def parse_palette(model: SemanticModel, measure: str, host: str) -> Palette:
     slots = {int(n): colour for n, colour in _SLOT.findall(body)}
     if modulus <= 0 or len(slots) != modulus:
         raise PaletteError(
-            f"[{measure}]: MOD cycles through {modulus} slot(s) but the SWITCH "
-            f"lists {len(slots)} colour(s); give exactly one colour per slot"
-        )
+            f"[{measure}] declares {len(slots)} slots for MOD {modulus}")
     missing = [n for n in range(base, base + modulus) if n not in slots]
     if missing:
         raise PaletteError(f"[{measure}] has no colour for slot(s) {missing}")
@@ -121,8 +134,12 @@ def parse_palette(model: SemanticModel, measure: str, host: str) -> Palette:
 def picker_registry(model: SemanticModel, picker: str) -> dict[str, int]:
     """``"Table.Measure"`` -> sort order, in source order (first wins)."""
     if model.table_named(picker) is None:
-        raise PaletteError(f"the picker table {picker!r} is not in the model")
+        raise PaletteError(
+            f"picker table {picker} not found at "
+            f"{model.definition_dir / 'tables' / f'{picker}.tmdl'}")
     registry: dict[str, int] = {}
+    for text in model.unparsed_nameofs(picker):
+        raise PaletteError(f"unparseable NAMEOF: {text!r}")
     for position, ref in enumerate(r for r in model.nameof_refs(picker) if r.in_tuple):
         if ref.qualifier:
             if not model.has_measure(ref.qualifier, ref.name):
@@ -131,14 +148,12 @@ def picker_registry(model: SemanticModel, picker: str) -> dict[str, int]:
         else:
             home = model.home_table(ref.name)
             if home is None:
-                raise PaletteError(
-                    f"{picker!r} row [{ref.name}] names no measure of the model"
-                )
+                raise PaletteError(f"cannot resolve the home table of [{ref.name}]")
             key = f"{home}.{ref.name}"
         order = int(ref.ordinal) if ref.ordinal is not None else position + 1
         registry.setdefault(key, order)
     if not registry:
-        raise PaletteError(f"the picker {picker!r} registers no measure")
+        raise PaletteError(f"{picker} parsed to zero entries -- refusing to write")
     return registry
 
 
@@ -215,6 +230,18 @@ class ColorReport:
     #: found them: the changed visuals' files first, then the changed
     #: bookmark files.
     changed: list[Path] = field(default_factory=list)
+    #: the palette header (two lines and a blank line).
+    header: list[str] = field(default_factory=list)
+    #: the multi-series bookmark listing, one block per capture.
+    listing: list[str] = field(default_factory=list)
+    #: the visuals that use the picker but cannot carry a per-measure colour.
+    unsupported: list[str] = field(default_factory=list)
+    #: the collision block (header, rows, hint).
+    collisions: list[str] = field(default_factory=list)
+    #: the unregistered block (header, rows).
+    unregistered: list[str] = field(default_factory=list)
+    #: the entries `reset` reverts.
+    restored: int = 0
 
 
 @dataclass
@@ -225,6 +252,8 @@ class ColorOptions:
     visual_types: tuple[str, ...] = BAR_TYPES + TABLE_TYPES
     min_series: int = 2
     all_visuals: bool = False
+    #: the user named the visual types, so the list filters.
+    filter_types: bool = False
 
 
 def _visuals(report: Path) -> Iterable[tuple[Path, dict]]:
@@ -265,43 +294,61 @@ def _multi_series(bookmarks: list[Bookmark], opts: ColorOptions):
                 yield bookmark, section_id, cid, single
 
 
+def _bookmark_label(bookmark: Bookmark) -> str:
+    """The name a bookmark block carries: its display name, or its file name."""
+    raw = bookmark.data.get("displayName")
+    if isinstance(raw, str) and raw:
+        return raw
+    return bookmark.path.name[: -len(".json")]
+
+
 def _bookmark_needs(
     bookmarks: list[Bookmark], registry: dict[str, int], palette: Palette,
     opts: ColorOptions, report: ColorReport,
 ) -> dict[tuple[str, str], set[str]]:
     """(page section, visual id) -> keys a multi-series bookmark shows on it.
 
-    Every series of such a capture (columns, line and values) is listed with
-    its role, sort order and colour; unregistered series and series sharing
-    a colour are reported.
+    Every series of such a capture (the columns and the first line) is
+    listed with its tag, sort order and colour; the series that share a
+    colour and the ones the picker does not register are reported.
     """
     needs: dict[tuple[str, str], set[str]] = {}
-    collided = False
+    collisions: list[tuple[str, str, str, str]] = []
+    unregistered: set[tuple[str, str]] = set()
     for bookmark, section_id, cid, single in _multi_series(bookmarks, opts):
-        report.info.append(f"bookmark {bookmark.display_name!r} on {cid}:")
+        label = _bookmark_label(bookmark)
+        report.listing.append(f"  {label}  [{cid}]")
         colours: dict[str, str] = {}
-        for role in VALUE_ROLES:
-            for key in _measure_keys(dig(single, "projections", role)):
-                if key not in registry:
-                    report.info.append(f"  {role:<6} {key}: not registered, no palette colour")
-                    report.notes.append(
-                        f"bookmark {bookmark.display_name!r}: {key} is not a row of "
-                        f"{palette.picker!r}, so it has no palette colour")
-                    continue
-                colour = palette.colour(registry[key])
-                report.info.append(f"  {role:<6} {key}: order {registry[key]}, colour {colour}")
-                if colour.lower() in colours and colours[colour.lower()] != key:
-                    collided = True
-                    report.notes.append(
-                        f"bookmark {bookmark.display_name!r}: {colours[colour.lower()]} and "
-                        f"{key} share colour {colour} on {cid}")
-                colours.setdefault(colour.lower(), key)
+        series = [("bar ", key) for key in _measure_keys(dig(single, "projections", "Y"))]
+        line = _measure_keys(dig(single, "projections", "Y2"))
+        if line:
+            series.append(("line", line[0]))
+        for tag, key in series:
+            if key not in registry:
+                report.listing.append(
+                    f"      {tag} {key:<60} -- NOT on the picker, no colour")
+                unregistered.add((label, key))
+                continue
+            colour = palette.colour(registry[key])
+            report.listing.append(
+                f"      {tag} {key:<60} order={registry[key]:<6} {colour}")
+            first = colours.setdefault(colour.lower(), key)
+            if first != key:
+                collisions.append((label, first, key, colour))
         known = [k for k in _measure_keys(dig(single, "projections", "Y")) if k in registry]
         needs.setdefault((section_id, cid), set()).update(known)
-    if collided:
-        report.notes.append(
-            f"hint: re-space the sort order of {palette.picker!r} (or add palette slots) so "
-            f"measures shown together land on different slots")
+    if collisions:
+        report.collisions.append("COLLISIONS -- two series in one bookmark share a slot:")
+        for label, first, second, colour in collisions:
+            report.collisions.append(f"  {label}: {first}  ==  {second}  ({colour})")
+        report.collisions.append(
+            "  Fix by re-spacing the picker Order, never by hand-colouring one of them.")
+        report.collisions.append("")
+    if unregistered:
+        report.unregistered.append("NOT REGISTERED on the picker (blank in the matrix too):")
+        for label, key in sorted(unregistered):
+            report.unregistered.append(f"  {label}: {key}")
+        report.unregistered.append("")
     return needs
 
 
@@ -311,16 +358,22 @@ def _targets(report_dir: Path, registry: dict[str, int], palette: Palette,
     targets = []
     for path, data in _visuals(report_dir):
         vtype = dig(data, "visual", "visualType")
-        if vtype not in opts.visual_types:
-            continue  # the visual-type filter comes first, silently
         page, vid = _identity(path, data)
         uses = _uses_picker(data, palette.picker)
         bookmarked = (page, vid) in needs
-        in_scope = opts.all_visuals or bookmarked or (vtype in TABLE_TYPES and uses)
         if _card(vtype) is None:
-            if in_scope or uses:
-                report.notes.append(f"{vid}: {vtype} uses {palette.picker!r} but is not supported")
+            # not a chart and not a matrix: it cannot carry a per-measure
+            # colour. The visual-type list limits only what gets stamped, so
+            # the check runs before the filter.
+            if uses and (opts.all_visuals or bookmarked) \
+                    and (not opts.filter_types or vtype in opts.visual_types):
+                report.unsupported.append(
+                    f"UNSUPPORTED: {vid} ({vtype}) uses {palette.picker}; "
+                    f"requires a visual with per-measure colour support")
             continue
+        if opts.filter_types and vtype not in opts.visual_types:
+            continue
+        in_scope = opts.all_visuals or bookmarked or (vtype in TABLE_TYPES and uses)
         if not in_scope:
             continue
         target = _Target(path, data, vtype, page, vid)
@@ -400,15 +453,21 @@ def _override_holder(single: Any) -> dict | None:
     return merge if isinstance(merge, dict) else objects
 
 
+def _palette_header(palette: Palette, registry: dict[str, int]) -> list[str]:
+    """The two lines and the blank line that open every run."""
+    return [
+        f"palette   : {palette.picker} -> {palette.rule()} -> {len(palette.slots)} slots",
+        f"registered: {len(registry)} measures on the picker",
+        "",
+    ]
+
+
 def sync(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) -> ColorReport:
     model = SemanticModel.load(model_dir)
     palette = parse_palette(model, opts.measure, opts.host_table)
     registry = picker_registry(model, palette.picker)
     report = ColorReport()
-    report.info.append(
-        f"palette: picker {palette.picker!r}, offset {palette.offset}, modulus "
-        f"{palette.modulus}, {len(palette.slots)} slot(s); {len(registry)} registered "
-        f"measure(s)")
+    report.header = _palette_header(palette, registry)
 
     def colour_of(key: str) -> str:
         return palette.colour(registry[key])
@@ -460,13 +519,13 @@ def sync(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) -> 
 
 
 def _revert_entries(entries: list, card: str, registry: dict[str, int], owned: set[str],
-                    opts: ColorOptions) -> tuple[list | None, bool]:
+                    opts: ColorOptions) -> tuple[list | None, int]:
     """Revert the palette colours of registered measures in one array.
 
-    Returns the new array (``None`` when it ends up empty) and whether
-    anything changed.
+    Returns the new array (``None`` when it ends up empty) and the number
+    of entries it reverted.
     """
-    changed = False
+    reverted = 0
     kept = []
     for entry in copy.deepcopy(entries):
         key = _metadata(entry)
@@ -477,7 +536,7 @@ def _revert_entries(entries: list, card: str, registry: dict[str, int], owned: s
         if card == "dataPoint":
             if _owned_colour(props.get("fill")) in owned:
                 props["fill"] = _theme_colour(opts.default_color_id)
-                changed = True
+                reverted += 1
             kept.append(entry)
             continue
         if _owned_colour(props.get("fontColor")) not in owned:
@@ -485,11 +544,11 @@ def _revert_entries(entries: list, card: str, registry: dict[str, int], owned: s
             continue
         props = {k: v for k, v in props.items()
                  if k != "fontColor" and not (k in _TABLE_OWNED and _is_true(v))}
-        changed = True
+        reverted += 1
         if props:
             entry["properties"] = props
             kept.append(entry)
-    return (kept or None), changed
+    return (kept or None), reverted
 
 
 def reset(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) -> ColorReport:
@@ -498,8 +557,10 @@ def reset(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) ->
     registry = picker_registry(model, palette.picker)
     owned = palette.colours | {BLACK}
     report = ColorReport()
+    report.header = _palette_header(palette, registry)
     dirty: dict[Path, dict] = {}
     types: dict[tuple[str, str], str] = {}
+    reverted = 0
     for path, data in _visuals(report_dir):
         vtype = dig(data, "visual", "visualType")
         types[_identity(path, data)] = vtype
@@ -509,8 +570,9 @@ def reset(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) ->
         card = _card(vtype)
         if card is None or not isinstance(objects, dict) or not isinstance(objects.get(card), list):
             continue
-        after, changed = _revert_entries(objects[card], card, registry, owned, opts)
-        if changed:
+        after, count = _revert_entries(objects[card], card, registry, owned, opts)
+        if count:
+            reverted += count
             if after is None:
                 objects.pop(card)
             else:
@@ -529,8 +591,9 @@ def reset(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) ->
                 holder = _override_holder(single)
                 if card is None or holder is None or not isinstance(holder.get(card), list):
                     continue
-                after, changed = _revert_entries(holder[card], card, registry, owned, opts)
-                if changed:
+                after, count = _revert_entries(holder[card], card, registry, owned, opts)
+                if count:
+                    reverted += count
                     if after is None:
                         holder.pop(card)
                     else:
@@ -539,6 +602,7 @@ def reset(report_dir: Path, model_dir: Path, opts: ColorOptions, apply: bool) ->
         if touched:
             dirty[bookmark.path] = bookmark.data
             report.changes.append(f"bookmark {bookmark.display_name!r}: overrides reverted")
+    report.restored = reverted
     _write(dirty, apply, report)
     return report
 

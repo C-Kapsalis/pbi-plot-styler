@@ -103,6 +103,30 @@
   (exit `2`) instead of the CLI's usage block, and a `visual.json` that
   does not parse prints `  ERROR reading <path>: <error>` on stderr and
   exits `2` instead of being passed over.
+- **`colors` prints the palette header and the blocks the colour script
+  printed.** Every run opens with
+  `palette   : <picker> -> MOD(order+<offset>, <modulus>)+<base> -> <n> slots`
+  and `registered: <n> measures on the picker`, then a blank line. The
+  multi-series bookmark listing is one block per capture
+  (`  <label>  [<visual id>]`, then `      bar  <key>  order=<n>  <hex>` per
+  column and `      line <key> ...` for the first line, the key padded to 60
+  columns). A visual that uses the picker but cannot carry a per-measure
+  colour prints `UNSUPPORTED: <visual> (<type>) uses <picker>; requires a
+  visual with per-measure colour support`; two series that share a slot
+  print the `COLLISIONS` block; a series the picker does not register prints
+  the `NOT REGISTERED` block. `colors reset` counts the entries it reverts
+  (`would restore <n> colour entry/entries in <f> file(s)`). The per-change
+  lines (`  <vid>: dataPoint for ...`, `  bookmark '<name>': overrides`, the
+  `note: ` lines, `DRY RUN:` and `APPLIED:`) are gone.
+- **The colour errors carry the `FAIL: ` prefix** and the wording of the
+  colour script: `<model>/definition/tables/<table>.tmdl not found`,
+  `[<measure>] not found in <path>`,
+  `could not read the picker/MOD rule out of [<measure>]`,
+  `[<measure>] declares <n> slots for MOD <m>`,
+  `picker table <picker> not found at <path>`,
+  `<picker> parsed to zero entries -- refusing to write`,
+  `cannot resolve the home table of [<name>]` and
+  `unparseable NAMEOF: <row>`. The exit code is `2`, as before.
 - **`colors sync` closes with the original's block.** The summary is
   `would write <f> file(s): <r> colour entry/entries rewritten, <a> added`,
   followed by the changed files (three leading spaces each) and, in a dry
@@ -448,6 +472,13 @@
   that well). Pickers an entry does not mention keep the base bookmark's
   selection on their slicers (never in a well). The legacy layout empties
   unmentioned pickers.
+- A usage error (a missing option, a path that does not exist) is reported
+  by the command-line framework, not by the tool: `Error: Missing option
+  '--report'.` and a usage block. The colour script and the gate scripts
+  printed their own argparse text; reproducing it would mean replacing the
+  parser, so the framework's wording stays. The two commands that name a
+  path of their own (`style` and the gate rules) report a path that does
+  not exist themselves, as `ERROR: <absolute path> does not exist`.
 
 ## v1.1.0, 2026-10-12
 
