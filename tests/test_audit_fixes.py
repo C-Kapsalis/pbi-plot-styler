@@ -199,3 +199,21 @@ def test_the_commands_doc_gives_the_self_test_output_the_right_way_round():
     doc = " ".join((ROOT / "docs" / "commands.md").read_text(encoding="utf-8").split())
     assert "the legacy layout prints `self-test PASS` only" in doc, doc
     assert "(the legacy layout adds" not in doc
+
+
+# -- 6: THM006 names only the missing theme and gives the right remedy -------------
+def test_the_thm006_violation_line_names_only_the_missing_theme(roastery):
+    # the example declares a baseTheme but no customTheme
+    out = _run("check", roastery / "Roastery.Report", "--rule", "theme").stdout
+    violations = [ln for ln in out.splitlines() if ln.startswith("   \U0001F534 ")]
+    assert violations == [
+        "   \U0001F534 report: Theme collection is incomplete - missing: customTheme. "
+        "Reports must declare both baseTheme and customTheme."], out
+
+
+def test_the_thm006_hint_says_to_declare_the_theme():
+    from pbi_plot_styler.rules import fix_hint
+
+    hint = fix_hint("THM006")
+    assert "themeCollection" in hint and "report.json" in hint, hint
+    assert "restore the missing theme file" not in hint

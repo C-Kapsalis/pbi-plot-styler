@@ -47,6 +47,12 @@
   layout adds the generated name, the measures and the matrix row count;
   the legacy layout prints `self-test PASS` only); the README's quickstart
   output and its sweep `SKIPPED` line match what the tool prints.
+- BUGFIX: the `Violations found` line of `THM006` names only the theme
+  that is missing. It always said `missing: baseTheme, customTheme`, even
+  when the lint line above it said `missing: customTheme`. The `THM006`
+  remediation hint now says to declare the missing theme (`baseTheme` or
+  `customTheme`) in the `themeCollection` of `report.json`; it said to
+  restore the missing theme file, which is `THM001`'s remedy.
 
 ## 1.2.1 (2026-10-22)
 

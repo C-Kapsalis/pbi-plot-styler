@@ -256,9 +256,8 @@ FINDING_TYPES = {
     "THM005": (None, "Report has no theme configuration. Without a base or custom "
                      "theme, ThemeDataColor references cannot resolve and visuals "
                      "fall back to Power BI defaults.", "report"),
-    "THM006": (None, "Theme collection is incomplete - missing: baseTheme, "
-                     "customTheme. Reports must declare both baseTheme and "
-                     "customTheme.", "report"),
+    # the description comes from the message, which names only what is missing
+    "THM006": (None, None, "report"),
     "PNL001": ("missing_master_container",
                "No y_filters_group master container found", "report"),
     "PNL002": ("wrong_container_type",
@@ -342,7 +341,8 @@ FIX_HINTS = {
                "legitimately need to be literal (e.g. image overlays), move them to "
                "the theme JSON."),
     "THM005": "add a base or custom theme to the report",
-    "THM006": "restore the missing theme file",
+    "THM006": ("declare the missing theme (baseTheme or customTheme) in the "
+               "themeCollection of report.json"),
     "POS001": "give the visual an x and y position in its visual.json",
     "YCG001": "rename the group to y<N>_combo_group",
     "YCG002": "move the member into its y<N>_combo_group",
