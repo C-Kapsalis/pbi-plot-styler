@@ -24,6 +24,30 @@ class RuleError(RuntimeError):
     """A rule cannot run on this report (exit 2, nothing written)."""
 
 
+class RuleAbort(RuleError):
+    """A rule cannot run, and says so in its own words (exit 2).
+
+    The message is printed as it stands: no `Error: ` prefix.
+    """
+
+
+def user_path(ctx: "RuleContext", report_dir: Path) -> str:
+    """The report folder as the user named it.
+
+    The PATH argument when the report is the PATH, otherwise the PATH
+    joined with the report's own path under it.
+    """
+    base = ctx.options.get("check_path")
+    if base is None:
+        return ctx.rel(report_dir)
+    if report_dir == base:
+        return base.as_posix()
+    try:
+        return (base / report_dir.relative_to(base)).as_posix()
+    except ValueError:
+        return report_dir.as_posix()
+
+
 @dataclass
 class RuleContext(ReportContext):
     """A report context with the canvas settings and lazily loaded indexes."""
@@ -92,6 +116,10 @@ class Rule:
     ordered: bool = False
     #: text output: ``(new findings, counts, framing, values) -> lines``.
     render: Callable[..., list[str]] | None = None
+    #: text output of a fix run: ``(ctx, changes) -> lines``.
+    render_fix: Callable[..., list[str]] | None = None
+    #: the closing lines of a fix run: ``(contexts) -> lines``.
+    fix_summary: Callable[..., list[str]] | None = None
 
     @property
     def summarised(self) -> tuple[str, ...]:
@@ -114,10 +142,14 @@ def _registry() -> dict[str, Rule]:
              run_integrity, _integrity_fix),
         Rule("slicer-gates", "selector slicers carry an active f-Slicer gate",
              ("GAT001", "GAT002"), gates.check_slicer_gates, gates.fix_slicer_gates,
-             critical=("GAT001", "GAT002")),
+             critical=("GAT001", "GAT002"), render=gates.render_slicer_gates,
+             render_fix=gates.render_slicer_gates_fix,
+             fix_summary=gates.slicer_gates_fix_summary),
         Rule("slicer-mode-gates", "slicer gates match the slicer mode",
              ("GAT003", "GAT004", "GAT005"), gates.check_mode_gates, gates.fix_mode_gates,
-             prepare=gates.gate_host_table),
+             prepare=gates.gate_host_table, render=gates.render_mode_gates,
+             render_fix=gates.render_mode_gates_fix,
+             fix_summary=gates.mode_gates_fix_summary, ordered=True),
         Rule("category-filter", "answer bookmarks set the analysis category",
              ("CAT001",), category.check_category_filter, critical=("CAT001",)),
         Rule("theme", "theme collection present, no hex literals",
@@ -132,9 +164,13 @@ def _registry() -> dict[str, Rule]:
              critical=("PNL001",)),
         Rule("format-selector", "a hidden, locked filter selects the Format item",
              ("FMT001",), format_selector.check_format_selector,
-             format_selector.fix_format_selector),
+             format_selector.fix_format_selector,
+             render=format_selector.render_format_selector,
+             render_fix=format_selector.render_format_selector_fix,
+             fix_summary=format_selector.format_selector_fix_summary),
         Rule("stale-placeholders", "saved state names a placeholder its axis offers",
-             ("PLH001",), placeholders.check_placeholders, placeholders.fix_placeholders),
+             ("PLH001",), placeholders.check_placeholders, placeholders.fix_placeholders,
+             ordered=True, render=placeholders.render_placeholders),
         Rule("answer-bookmarks", "whole-page answer bookmarks and their page",
              ("ABK000", "ABK001", "ABK003", "ABK004", "ABK005", "ABK006", "ABK007",
               "ABK008", "ABK009", "ABK010", "PGW001", "PGW002", "JSN001"),

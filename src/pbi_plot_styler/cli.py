@@ -49,7 +49,7 @@ from .colors import reset as color_reset
 from .colors import sync as color_sync
 from .labels import LabelRenameError, rename_labels
 from .rename import count_measure_refs, rename_measure, report_roots
-from .rules import SUMMARY_RULES, UNBASELINABLE, RuleContext, RuleError, fix_hint, rules
+from .rules import SUMMARY_RULES, UNBASELINABLE, RuleAbort, RuleContext, RuleError, fix_hint, rules
 from .rules.answers import load_display_name_filter
 from .tmdl import SemanticModel
 
@@ -622,7 +622,7 @@ def _filtered_reports(path: Path, report_name: str | None, model_name: str | Non
 @main.command("check")
 @click.argument(
     "path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=click.Path(path_type=Path),
 )
 @click.option(
     "--model",
@@ -640,7 +640,20 @@ def _filtered_reports(path: Path, report_name: str | None, model_name: str | Non
     help="Run this rule instead of the default 'integrity' checks "
     "(repeatable). Rules: integrity, slicer-gates, slicer-mode-gates, "
     "category-filter, theme, visual-position, y-combo, filter-panel, "
-    "format-selector, stale-placeholders, answer-bookmarks, bookmark-literals.",
+    "format-selector, stale-placeholders, answer-bookmarks, bookmark-literals. "
+    "slicer-gates: Enforce the `f-Slicer > 0` visual-level gate on every "
+    "Report field-parameter slicer (foundation rule #1). Check: scan only; "
+    "exit 1 if any Report slicer lacks the gate. Fix: inject the gate into "
+    "every violating slicer in place. "
+    "slicer-mode-gates: Enforce the owner's slicer-gate convention across a "
+    "report. Dropdown slicer -> visual-level filter [f-Slicer] > 0. "
+    "Vertical-list slicer -> visual-level filter [f-All] > 0. "
+    "format-selector: Enforce the z-Selector Format='Format' report-level "
+    "filter across every Report report. Check: scan only; exit 1 if any "
+    "report lacks the filter. Fix: add or repair the filter on every report "
+    "under PATH. "
+    "stale-placeholders: pbi-plot-styler check --rule stale-placeholders "
+    "--fix — repoint a saved blank-dimension binding.",
 )
 @click.option(
     "--config",
@@ -738,6 +751,8 @@ def check(
         raise StylerError(
             f"unknown rule(s) {', '.join(unknown)}. Valid rules: {_rule_help()}."
         )
+    if not path.exists():
+        _abort(f"ERROR: {path.resolve()} does not exist")
     if dry_run and not fix:
         raise StylerError("--dry-run only applies to --fix: add --fix to preview the fixes.")
     if config_path is None:
@@ -771,6 +786,7 @@ def check(
     accepted = {k for k in accepted if k[0] not in UNBASELINABLE}
 
     options: dict = {}
+    options["check_path"] = path
     try:
         builder = load_builder_settings(config_path)
         options["picker_labels"] = {vid: key for key, vid in builder.pickers.items()}
@@ -810,6 +826,8 @@ def check(
     planned: list[tuple[Path, str]] = []
     diffs: list[str] = []
     refused: list[tuple[Path, str]] = []
+    fix_lines: list[str] = []
+    fix_summary_lines: list[str] = []
     findings: list[Finding] = []
     skipped_notes: list[str] = []
     checked: dict[str, int] = {}
@@ -818,6 +836,7 @@ def check(
     def keep_notes(ctx: RuleContext) -> None:
         skipped_notes.extend(n for n in ctx.skipped if n not in skipped_notes)
 
+    fixers: list = []
     if fix:
         fixers = [registry[s] for s in slugs if registry[s].fix is not None]
         # Everything a fixer needs is checked for every report before any
@@ -827,6 +846,8 @@ def check(
                 for rule in fixers:
                     if rule.prepare is not None:
                         rule.prepare(contexts[report]())
+        except RuleAbort as exc:
+            _abort(str(exc))
         except RuleError as exc:
             raise StylerError(f"{exc}. --fix stopped before writing: nothing was written.") from exc
         if dry_run:
@@ -836,11 +857,28 @@ def check(
                 for report in reports:
                     for rule in fixers:
                         ctx = contexts[report]()
-                        fixed += rule.fix(ctx)
+                        changes = rule.fix(ctx)
+                        fixed += changes
+                        if rule.render_fix is not None:
+                            fix_lines += rule.render_fix(ctx, changes)
+                        else:
+                            fix_lines += [
+                                f"fixed    {p.relative_to(root).as_posix()}: {d}"
+                                for p, d in changes
+                            ]
                         refused += ctx.options.pop("refused", [])
+                        for path, message in ctx.options.pop("read_errors", []):
+                            click.echo(message, err=True)
+                        for message in ctx.options.pop("stderr_lines", []):
+                            click.echo(message, err=True)
                         keep_notes(ctx)
+            except RuleAbort as exc:
+                _abort(str(exc))
             except RuleError as exc:
                 raise StylerError(_partial_fix_message(exc, fixed, root)) from exc
+    for rule in fixers:
+        if rule.fix_summary is not None:
+            fix_summary_lines += rule.fix_summary(contexts)
 
     for report in reports:
         ctx = contexts[report]()
@@ -854,6 +892,8 @@ def check(
                 if not registry[slug].ordered:
                     added = sorted(added, key=lambda f: (f.file, f.check_id, f.subject))
                 found += added
+        except RuleAbort as exc:
+            _abort(str(exc))
         except RuleError as exc:
             raise StylerError(str(exc)) from exc
         findings += found
@@ -863,7 +903,14 @@ def check(
         for slug, counts in ctx.details.items():
             total = details.setdefault(slug, {})
             for what, n in counts.items():
-                total[what] = total.get(what, 0) + n
+                if isinstance(n, bool):
+                    total[what] = n
+                elif isinstance(n, int):
+                    total[what] = total.get(what, 0) + n
+                elif isinstance(n, list):
+                    total.setdefault(what, []).extend(n)
+                else:
+                    total[what] = n
 
     if "bookmark-literals" in slugs and "bookmark-literals" not in checked:
         raise StylerError(
@@ -930,16 +977,19 @@ def check(
         for note in notes:
             click.echo(f"note: {note}", err=True)
         for note in skipped_notes:
-            click.echo(f"skipped  {note}")
-        for p, d in fixed:
-            click.echo(f"fixed    {p.relative_to(root).as_posix()}: {d}")
+            if not note.startswith("stale-placeholders:"):
+                click.echo(f"skipped  {note}")
+        for line in fix_lines:
+            click.echo(line)
+        for line in fix_summary_lines:
+            click.echo(line)
         for p, d in planned:
             click.echo(f"would fix {p.relative_to(root).as_posix()}: {d}")
         for diff in diffs:
             click.echo(diff, nl=False)
         for p, r in refused:
             click.echo(f"REFUSED  {p.relative_to(root).as_posix()}: {r}")
-        for line in _finding_lines(registry, slugs, new, details, settings):
+        for line in _finding_lines(registry, slugs, new, details, settings, path, fix):
             click.echo(line)
         by_id: dict[str, list[str]] = {}
         for check_id, location in healed:
@@ -977,7 +1027,8 @@ def _framing(f: Finding) -> str:
 
 
 def _finding_lines(registry, slugs, new: list[Finding], details: dict,
-                   settings: Settings) -> list[str]:
+                   settings: Settings, check_path: Path | None = None,
+                   fixing: bool = False) -> list[str]:
     """The text lines of the new findings, grouped per rule in run order.
 
     A rule with its own ``render`` adds its header and summary lines; any
@@ -991,6 +1042,9 @@ def _finding_lines(registry, slugs, new: list[Finding], details: dict,
         "dropdowns": "/".join(settings.panel.filter_tables[:1] + tuple(
             t.rsplit(" ", 1)[-1] for t in settings.panel.filter_tables[1:])),
         "slot_table": settings.placeholders.template_slot_table,
+        "check_path": str(check_path.resolve()) if check_path else "",
+        "check_folder": check_path.name if check_path else "",
+        "fixing": "1" if fixing else "",
     }
     owner: dict[int, str] = {}
     for f in new:

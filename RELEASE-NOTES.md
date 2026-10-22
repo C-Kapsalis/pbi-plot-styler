@@ -103,6 +103,42 @@
   (exit `2`) instead of the CLI's usage block, and a `visual.json` that
   does not parse prints `  ERROR reading <path>: <error>` on stderr and
   exits `2` instead of being passed over.
+- **The gate rules print their blocks and their counts.** A `slicer-gates`
+  check prints `1/2 visual(s) missing the active gate:` with
+  `<visual>  (<absolute path>)` per visual, then
+  `2 bookmark visualContainer(s) lack the active gate (would erase it on
+  apply):` with `<bookmark file> -> page <page id> vc <container id>` per
+  capture; a clean run prints `All <n> Report slicer(s) carry active
+  `f-Slicer > 0` gates AND all bookmarks restore them faithfully.` A
+  `slicer-gates --fix` prints the source entity
+  (`  <report>: source entity = 'f-Filters'  (declared in
+  <model>/definition/tables/f-Filters.tmdl)`), the
+  `    patched visual <name>` and `    patched bookmark <file>` lines and
+  `Patched <n>/<seen> visual(s) and <n> bookmark file(s).` A report whose
+  model does not declare the gate measure is reported on stderr as
+  `  ERROR (<report>): <reason>` / `    skipping all violating slicers
+  under this report.` and left as it is; the other reports are still
+  fixed. A `slicer-mode-gates` check prints the source entity, the padded
+  state lines (`absent       Basic     -> f-All     p1/s1`) and the
+  `Would patch` totals; its fix prints the `Patched` totals. A
+  `format-selector` check prints `<bad>/<seen> report(s) missing or
+  misconfigured filter:` and the reason (`no report-level filter on
+  z-Selector Format[Selector Format]`, `2 duplicate filters on the same
+  field`, `filter value is <value>, expected "'Format'" - ...`, `filter is
+  not hidden (isHiddenInViewMode != true)`, `filter is not locked
+  (isLockedInViewMode != true)`, `could not parse <path>: <error>`); its
+  fix prints `  <absolute path>: patched (<reason>)` and `Patched
+  <n>/<seen> report(s).` A `stale-placeholders` run prints the per-file
+  `  would repoint   2 in visual <file>: <old>-><new> (<where>)` lines,
+  the `  SKIPPED <file>: <role>: [<axes>] offer [...] — ambiguous` lines
+  and `stale: <n>; skipped <k>` (`repointed:` under `--fix`).
+- **A path that does not exist is reported by the tool**, as
+  `ERROR: <absolute path> does not exist` on stderr (exit `2`), instead
+  of the command-line framework's usage block.
+- **`check --help` describes the four gate rules** with the wording of the
+  earlier gate scripts (the `f-Slicer > 0` gate, the slicer-mode
+  convention, the `z-Selector Format='Format'` filter and the stale
+  blank-dimension binding).
 - **`colors` prints the palette header and the blocks the colour script
   printed.** Every run opens with
   `palette   : <picker> -> MOD(order+<offset>, <modulus>)+<base> -> <n> slots`

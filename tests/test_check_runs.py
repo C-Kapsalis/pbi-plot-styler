@@ -76,7 +76,8 @@ def test_fix_validates_every_report_before_writing_any(tmp_path):
     result = run("check", client, "--rule", "slicer-mode-gates", "--fix")
     assert result.exit_code == 2, result.output
     assert "Finalized/Weekly.Report" in result.output
-    assert "nothing was written" in result.output
+    assert result.output.startswith("!! could not find a table declaring both "
+                                   "[f-Slicer] and [f-All] for ")
     assert _snapshot(client) == before
 
 

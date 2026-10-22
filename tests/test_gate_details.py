@@ -106,7 +106,8 @@ def test_the_gate_fixer_continues_past_a_report_it_cannot_fix(tmp_path):
     before = _snapshot(first / "-Canvas.Report")
     result = run("check", root, "--rule", "slicer-gates", "--fix")
     assert result.exit_code == 1, result.output
-    assert "REFUSED" in result.output and "a/gate-order/-Canvas.Report" in result.output
+    assert "ERROR (" in result.output and "a/gate-order/-Canvas.Report" in result.output
+    assert "skipping all violating slicers under this report." in result.output
     assert _snapshot(first / "-Canvas.Report") == before
     assert check_json(_report(second), "slicer-gates")["exit_code"] == 0
 

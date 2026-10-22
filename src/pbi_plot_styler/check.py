@@ -442,7 +442,14 @@ class ReportContext:
         return False
 
     def rel(self, path: Path) -> str:
-        return path.relative_to(self.root).as_posix()
+        try:
+            return path.relative_to(self.root).as_posix()
+        except ValueError:
+            pass
+        try:
+            return path.resolve().relative_to(self.root.resolve()).as_posix()
+        except ValueError:
+            return path.as_posix()
 
     def add(self, check_id: str, path: Path, subject: str, message: str,
             fixable: bool = False, distinct: str = "") -> None:
