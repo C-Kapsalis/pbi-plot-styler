@@ -67,3 +67,23 @@ def test_the_dry_run_names_an_excluded_role_measure(roastery):
     wrote = _run("style", report, "--exclude-role", "Y")
     assert "dataPoint 0 -> 5" in wrote.output
     assert "1 columns-role measure(s) excluded" in wrote.output
+
+
+# -- 2: a relative page folder or visual.json styles the visuals under it --------
+PAGE = "Roastery.Report/definition/pages/a1f935c9ad3918c55c49"
+
+
+@pytest.mark.parametrize("scope", [PAGE, f"{PAGE}/visuals/{COMBO}/visual.json"],
+                         ids=["page-folder", "visual-file"])
+def test_a_relative_scope_path_styles_its_visuals(roastery, monkeypatch, scope):
+    monkeypatch.chdir(roastery)
+    result = _run("style", scope, "--dry-run")
+    assert result.exit_code == 1, result.output
+    assert f"  {COMBO}: WOULD CHANGE" in result.output
+
+
+def test_the_current_page_folder_styles_its_visuals(roastery, monkeypatch):
+    monkeypatch.chdir(roastery / PAGE)
+    result = _run("style", ".", "--dry-run")
+    assert result.exit_code == 1, result.output
+    assert f"  {COMBO}: WOULD CHANGE" in result.output

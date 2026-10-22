@@ -649,9 +649,12 @@ def plan_changes(
     if config.rebind_stale_line and not roles:
         roles = (config.column_role,)
     changes: list[VisualChange] = []
+    scope = within.resolve() if within is not None else None
     for visual_file in iter_visual_files(report_dir):
-        if within is not None and visual_file != within and within not in visual_file.parents:
-            continue
+        if scope is not None:
+            absolute = visual_file.resolve()
+            if absolute != scope and scope not in absolute.parents:
+                continue
         # Read raw bytes so change detection is byte-accurate (no newline
         # translation on Windows).
         raw = visual_file.read_bytes()

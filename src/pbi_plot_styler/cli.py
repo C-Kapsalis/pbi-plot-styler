@@ -359,14 +359,17 @@ def style(
         raise StylerError(str(exc)) from exc
 
     within: Path | None = None
-    if report_dir.is_file() or not is_report_dir(report_dir) and enclosing_report(report_dir):
+    # The scope and its report are both taken from the absolute path, so a
+    # relative page folder, visual.json or `.` compares like an absolute one.
+    scope = report_dir.resolve()
+    if scope.is_file() or not is_report_dir(scope) and enclosing_report(scope):
         # a page folder or a visual file: restyle only what lies under it
-        enclosing = enclosing_report(report_dir)
+        enclosing = enclosing_report(scope)
         if enclosing is None:
             raise StylerError(
                 f"{report_dir} is not inside a *.Report folder. Pass a report "
                 f"folder, a folder of reports, a page folder or a visual.json.")
-        within, report_dir = report_dir.resolve(), enclosing
+        within, report_dir = scope, enclosing
     discovery = discover_reports(report_dir)
     if not discovery.reports:
         raise StylerError(

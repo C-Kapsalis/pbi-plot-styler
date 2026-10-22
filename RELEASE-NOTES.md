@@ -10,6 +10,11 @@
   measures no field parameter offers. Without `--exclude-role` it named a
   column measure (`Sales Measures.Revenue` on the coffee-roastery example)
   that the write run then styled (`0 columns-role measure(s) excluded`).
+- BUGFIX: `style` with a relative page folder or `visual.json` (or `.`
+  inside a page folder) styles the visuals under it. The scope was made
+  absolute but its report stayed relative, so no visual matched and the run
+  stopped with `no targeted visuals found` (exit `2`); an absolute path
+  worked.
 
 ## 1.2.1 (2026-10-22)
 
