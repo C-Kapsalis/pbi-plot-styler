@@ -1,6 +1,6 @@
 # Release notes
 
-## Fixes after v1.2.0 (unreleased)
+## 1.2.1 (2026-10-22)
 
 ### Fixed
 
@@ -14,7 +14,7 @@
   calls their accepted entries healed, and `--update-baseline` keeps them.
   `--summary` still never fails (exit `0`).
 
-## Unreleased
+## 1.2.0 (2026-10-22)
 
 ### Added
 
