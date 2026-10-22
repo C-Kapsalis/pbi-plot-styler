@@ -385,9 +385,10 @@ def style(
     skipped_visuals: list[str] = []
     #: visual files that do not parse: (path, the JSON error).
     unreadable: list[tuple[Path, str]] = []
-    # A report that cannot be paired with a model is skipped; a report whose
-    # model has no usable field parameters is an error unless the run sweeps
-    # several reports and no --model was named.
+    # A report that cannot be paired with a model, or whose model has no
+    # usable field parameters, is skipped only when the run sweeps several
+    # reports and no --model was named; a single report or --model makes it
+    # a fatal error.
     lenient = not discovery.single and model_dir is None
 
     for report in discovery.reports:
@@ -396,7 +397,9 @@ def style(
             if resolved_model not in models:
                 models[resolved_model] = SemanticModel.load(resolved_model)
             model = models[resolved_model]
-        except (FileNotFoundError, LookupError, OSError, ValueError):
+        except (FileNotFoundError, LookupError, OSError, ValueError) as exc:
+            if not lenient:
+                raise StylerError(str(exc)) from exc
             skipped_visuals += _combo_visuals(report, config.visual_types)
             continue
         try:

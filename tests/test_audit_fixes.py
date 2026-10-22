@@ -87,3 +87,42 @@ def test_the_current_page_folder_styles_its_visuals(roastery, monkeypatch):
     result = _run("style", ".", "--dry-run")
     assert result.exit_code == 1, result.output
     assert f"  {COMBO}: WOULD CHANGE" in result.output
+
+
+# -- 3: a single report or --model without a usable model is a fatal error --------
+def _break_model(roastery: Path, how: str) -> None:
+    if how == "no-pbir":
+        (roastery / "Roastery.Report" / "definition.pbir").unlink()
+    elif how == "no-model":
+        shutil.rmtree(roastery / "Roastery.SemanticModel")
+    elif how == "no-tables":
+        shutil.rmtree(roastery / "Roastery.SemanticModel" / "definition" / "tables")
+
+
+@pytest.mark.parametrize("how", ["no-pbir", "no-model", "no-tables"])
+@pytest.mark.parametrize("dry_run", [False, True], ids=["write", "dry-run"])
+def test_a_single_report_without_a_usable_model_fails(roastery, how, dry_run):
+    _break_model(roastery, how)
+    result = _run("style", roastery / "Roastery.Report", *(["--dry-run"] if dry_run else []))
+    assert result.exit_code == 2, result.output
+    assert "SKIPPED" not in result.output
+    assert "already in sync" not in result.output
+    assert "Error:" in result.output
+
+
+def test_model_without_tables_fails_even_for_a_sweep(roastery):
+    _break_model(roastery, "no-tables")
+    result = _run("style", roastery, "--model", roastery / "Roastery.SemanticModel")
+    assert result.exit_code == 2, result.output
+    assert "SKIPPED" not in result.output
+
+
+def test_a_sweep_still_skips_a_report_without_a_model(roastery, tmp_path):
+    other = tmp_path / "coffee-roastery" / "second"
+    other.mkdir()
+    shutil.copytree(roastery / "Roastery.Report", other / "Second.Report")
+    (other / "Second.Report" / "definition.pbir").unlink()
+    result = _run("style", roastery, "--dry-run")
+    assert result.exit_code == 1, result.output
+    assert f"  {COMBO}: SKIPPED - no paired SemanticModel" in result.output
+    assert "(1 skipped)" in result.output

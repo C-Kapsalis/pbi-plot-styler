@@ -15,6 +15,15 @@
   absolute but its report stayed relative, so no visual matched and the run
   stopped with `no targeted visuals found` (exit `2`); an absolute path
   worked.
+- BUGFIX: `style` on a single report, or with `--model`, stops with exit
+  `2` and the reason when the paired model cannot be used: no
+  `definition.pbir`, a model folder that is missing, or a model without a
+  `definition/tables` folder. It printed `SKIPPED - no paired
+  SemanticModel`, exited `0`, and a dry run even said `All 1 combo
+  chart(s) already in sync (1 skipped)`, although the 1.2.0 notes promise
+  that a single report or `--model` keeps the fatal error. A sweep of a
+  folder of reports without `--model` still skips such a report with its
+  `SKIPPED` lines, as documented.
 
 ## 1.2.1 (2026-10-22)
 

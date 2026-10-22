@@ -61,11 +61,13 @@ def test_a_sweep_skips_a_report_whose_model_styles_nothing(tmp_path, project, br
     assert "(2 skipped)" in result.output
 
 
-def test_a_single_report_bound_to_a_dataset_is_skipped(report_dir):
+def test_a_single_report_bound_to_a_dataset_keeps_the_fatal_error(report_dir):
+    # BUGFIX: a single report keeps the fatal error; only a sweep skips.
     _bind_to_dataset(report_dir)
     result = _run(report_dir)
-    assert result.exit_code == 0, result.output
-    assert "SKIPPED - no paired SemanticModel" in result.output
+    assert result.exit_code == 2, result.output
+    assert "SKIPPED" not in result.output
+    assert "--model" in result.output
 
 
 def test_a_sweep_with_model_keeps_the_fatal_error(tmp_path, project, brewbar):
