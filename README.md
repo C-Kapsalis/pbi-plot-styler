@@ -152,26 +152,28 @@ pbi-plot-styler "Roastery.Report"
 ```
 
 ```
-Model:    .../Roastery.SemanticModel
-Measures: 5 drive the styling
-  styled definition/pages/monthlyperformance/visuals/combo01/visual.json: dataPoint 0 -> 5, labels 0 -> 6
-  styled definition/pages/seasonaltrends/visuals/combo02/visual.json: dataPoint 0 -> 5, labels 0 -> 6
+Field parameters: x-Plot Specific 1, x-Plot Specific 2, y-Plot Specific (dimension: x-Plot Specific 1, x-Plot Specific 2; metric: y-Plot Specific)
+  combo01: dataPoint 1 -> 5, labels 0 -> 6 (5 line measures each; 0 columns-role measure(s) excluded; 1 bar-side entry preserved)
+  combo02: dataPoint 0 -> 5, labels 0 -> 6 (5 line measures each; 0 columns-role measure(s) excluded; 1 bar-side entry preserved)
 
-Restyled 2/2 visual(s); 0 already styled.
-Totals: 0 rebind(s), 0 skipped.
+Models resolved: 1
+rebuilt 2/2 combo chart(s).
 ```
 
-Each styled line gives the entry counts before and after and, with
-`--exclude-role`, the column-side measures left unstyled.
+The first line names the field parameters detected in the model (or
+`Field parameters: <names> (explicit)` when `--table` or the config lists
+them). Each visual line gives the entry counts before and after and, with
+`--exclude-role`, the number of column-side measures left unstyled.
 
-Run it again and it reports `Restyled 0/2 visual(s); 2 already styled`, the
+Run it again and it reports `rebuilt 0/2 combo chart(s).`, the
 command is safe to run after every model change, mechanically.
 
 `REPORT_DIR` can also be any folder that contains one or more `*.Report`
 folders, at any depth: every report found is styled against its own model.
 In such a sweep (without `--model`), a report whose model cannot be resolved
-or loaded, or whose model styles no measure, is skipped with a `Skipped:`
-line and counted in the totals; the other reports are styled as usual. A
+or loaded, or whose model styles no measure, is skipped with one
+`<visual>: SKIPPED - no paired SemanticModel (...)` line per combo chart
+and counted in the totals; the other reports are styled as usual. A
 single named report, or a run with `--model`, still stops with exit `2`.
 `REPORT_DIR` may also be a page folder or a `visual.json` inside a report:
 only the visuals under that path are restyled.
@@ -218,8 +220,8 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 
 | TOML key | CLI flag | Default | Controls |
 |---|---|---|---|
-| `tables.field_parameters` | `--table` (repeatable) | `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` | Field-parameter tables whose `NAMEOF` measure references drive the styling. A shell-style pattern such as `x-*` matches the model's tables case-insensitively; one that matches nothing adds nothing. Restrict this to just the table that feeds your line to style only the line; if that table's measure catalog overlaps with the columns' table, also set `exclude_current_roles` below. |
-| `tables.renames` | `--rename-table OLD=NEW` (repeatable) | none | Renames one table in the list above, leaving the other default names in place |
+| `tables.field_parameters` | `--table` (repeatable) | detected from the model's TMDL (the metric parameters drive the styling) | Field-parameter tables whose `NAMEOF` measure references drive the styling. A shell-style pattern such as `x-*` matches the model's tables case-insensitively; one that matches nothing adds nothing. Restrict this to just the table that feeds your line to style only the line; if that table's measure catalog overlaps with the columns' table, also set `exclude_current_roles` below. |
+| `tables.renames` | `--rename-table OLD=NEW` (repeatable) | none | Renames one table of the `field_parameters` / `--table` list, leaving the rest of the list in place. Without a list the tables are detected, so a renamed table is found anyway; `OLD` must then be one of the legacy names `x-Plot Specific 1`, `x-Plot Specific 2`, `y-Plot Specific` |
 | `targets.visual_types` | `--visual-type` (repeatable) | `lineClusteredColumnComboChart`, `lineStackedColumnComboChart` | Which `visualType` values get restyled |
 | `targets.exclude_current_roles` | `--exclude-role NAME` (repeatable) | none | Query role (for example `Y`, Power BI's internal name for the columns) whose measures are excluded from styling, per visual: the measure bound to it, or, when the role is bound through a field parameter, every measure that parameter offers. Their existing formatting is kept. Re-reads the binding on every run. |
 | `style.line_color` | `--line-color` | `#118DFF` | Series fill (line and columns) for every measure |
@@ -238,7 +240,7 @@ config file > defaults.** All hex colors are 6-digit `#RRGGBB`.
 | - | `--rebind-stale-line` | off | Before styling, points a line measure the model no longer declares (for example `!Cost` after a rename to `Cost`) at the current measure. Leading symbols are stripped, then an exact name or a single case-insensitive match in the same table wins; anything else is left alone. With this flag the column role counts as column side unless `--exclude-role` is given. `--dry-run` prints a `would rebind` line per projection |
 | - | `--model DIR` | from `definition.pbir` | Semantic-model folder override |
 | - | `--config FILE` | `./plotstyler.toml` if present | Config file path |
-| - | `--dry-run` | off | Diff only; write nothing |
+| - | `--dry-run` | off | Print a `WOULD CHANGE` block per visual; write nothing |
 | - | `--zip OUT.zip` | - | Also emit the styled report as an archive |
 
 A brand-color config looks like:
@@ -255,7 +257,10 @@ label_transparency = 30
 
 ## Dry-run and CI
 
-`--dry-run` prints a unified diff per out-of-style visual and writes nothing.
+`--dry-run` prints a block per out-of-style visual (`<visual>: WOULD
+CHANGE`, the column measures kept out of the line set, the stale line
+rebinds, and the `objects.dataPoint[]` / `objects.labels[]` entry counts)
+and writes nothing.
 Exit codes are CI-grade:
 
 | Code | Meaning |

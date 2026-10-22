@@ -64,12 +64,18 @@ pbi-plot-styler examples/coffee-roastery/Roastery.Report --dry-run
 pbi-plot-styler examples\coffee-roastery\Roastery.Report --dry-run
 ```
 
-You'll see a unified diff adding a `dataPoint` array (one series color per
-measure) and a `labels` array (data labels on, text color, and a background
-per measure) to both `combo01` and `combo02`, and:
+You'll see that the combo chart would gain a `dataPoint` array (one series
+color per measure) and a `labels` array (data labels on, text color, and a
+background per measure):
 
 ```
-2/2 visual(s) would change.
+Field parameters: x-Plot Specific 1, x-Plot Specific 2, y-Plot Specific (dimension: y-Plot Specific; metric: x-Plot Specific 1, x-Plot Specific 2)
+  5dd25eb672a72da45096: WOULD CHANGE
+    objects.dataPoint[]: 0 -> 6 entries
+    objects.labels[]: 0 -> 7 entries
+
+Models resolved: 1
+1/1 combo chart(s) need rebuild (re-run without --dry-run).
 ```
 
 ## See it in Power BI Desktop — the before/after

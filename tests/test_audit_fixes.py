@@ -159,3 +159,43 @@ def test_the_mode_gate_check_spells_entries(tmp_path):
     out = _run("check", root / "-Canvas.Report", "--rule", "slicer-mode-gates").stdout
     assert "  Would patch 2 visual(s) and 0 bookmark entries" in out
     assert "entrie(s)" not in out
+
+
+# -- 5: the help, the docs and the explicit field-parameter line ------------------
+def _option_help(command: str, option: str) -> str:
+    """The help text of one option, joined onto one line."""
+    out = _run(command, "--help").output
+    lines = out.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.strip().startswith(option))
+    text = [lines[start].strip()]
+    for line in lines[start + 1:]:
+        if line.strip().startswith("-") or not line.strip():
+            break
+        text.append(line.strip())
+    return " ".join(text)
+
+
+def test_the_style_dry_run_help_describes_the_block_not_a_diff():
+    text = _option_help("style", "--dry-run")
+    assert "diff" not in text, text
+    assert "WOULD CHANGE" in text, text
+
+
+@pytest.mark.parametrize("option", ["--table", "--rename-table"])
+def test_the_table_options_describe_the_detection(option):
+    text = _option_help("style", option)
+    assert "trio" not in text, text
+    assert "detected" in text, text
+
+
+def test_an_explicit_list_prints_its_field_parameter_line(roastery):
+    result = _run("style", roastery / "Roastery.Report", "--dry-run",
+                  "--table", "x-Plot Specific 2")
+    lines = result.output.splitlines()
+    assert lines[0] == "Field parameters: x-Plot Specific 2 (explicit)", result.output
+
+
+def test_the_commands_doc_gives_the_self_test_output_the_right_way_round():
+    doc = " ".join((ROOT / "docs" / "commands.md").read_text(encoding="utf-8").split())
+    assert "the legacy layout prints `self-test PASS` only" in doc, doc
+    assert "(the legacy layout adds" not in doc

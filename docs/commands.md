@@ -178,8 +178,8 @@ capture) go to stderr. Error messages start with the entry's display name
 legacy-layout limits, which start with the entry's analysis category
 (`Spend: need >=3 measures, got 2`). `--self-test` builds one synthetic entry
 from the base bookmark in memory, checks it and prints `self-test PASS`
-(the legacy layout adds the generated name, the measures and the matrix row
-count); nothing is written.
+followed by the generated name, the measures and the matrix row count; the
+legacy layout prints `self-test PASS` only. Nothing is written.
 
 The default layout always leaves a `visualContainerGroups` map on the built
 section and `projections` / `parameters` on a captured chart; the legacy

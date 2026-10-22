@@ -35,6 +35,18 @@
   the gate pass, as they are repointed). The check-mode line reads
   `Would patch <n> visual(s) and <n> bookmark entries` (`1 bookmark
   entry`) instead of `entrie(s)`.
+- `style` with an explicit field-parameter list (`--table` or `[tables]
+  field_parameters`) prints `Field parameters: <names> (explicit)`, the
+  line the 1.2.0 notes promise; it printed no field-parameter line at all.
+- Help and docs: `style --dry-run` describes the `WOULD CHANGE` block it
+  prints (the help still said it prints a unified diff, and so did the
+  README and the example's README); `--table` and `--rename-table`
+  describe the detection of the model's field parameters instead of the
+  old `x-Plot Specific` trio default; docs/commands.md gives the
+  `bookmarks build --self-test` output the right way round (the default
+  layout adds the generated name, the measures and the matrix row count;
+  the legacy layout prints `self-test PASS` only); the README's quickstart
+  output and its sweep `SKIPPED` line match what the tool prints.
 
 ## 1.2.1 (2026-10-22)
 
