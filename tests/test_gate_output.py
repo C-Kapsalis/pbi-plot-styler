@@ -194,3 +194,20 @@ def test_the_help_carries_the_rule_descriptions():
     assert "Fix: add or repair the filter on every report under PATH." in out
     assert ("pbi-plot-styler check --rule stale-placeholders --fix — repoint a saved "
             "blank-dimension binding") in out
+
+
+# -- SCX64 and SCX65: the stale placeholders in detail ---------------------------------
+def test_the_placeholder_run_prints_the_per_file_lines(tmp_path):
+    from canvas_variants import VARIANTS
+    root = copy_fixture("universal", tmp_path)
+    VARIANTS["stale-series"](root)
+    VARIANTS["stale-ambiguous"](root)
+    out = run("check", root, "--rule", "stale-placeholders").stdout
+    lines = out.splitlines()
+    assert lines[0].startswith("  would repoint   1 in visual ")
+    assert "z->z_space (Series)" in lines[0]
+    assert lines[1].startswith("  SKIPPED ")
+    assert "offer ['z', 'z_space'] — ambiguous" in lines[1]
+    assert any(ln.startswith("ERROR    PLH001  ") and "z->z_space (Series)" in ln
+               for ln in lines)
+    assert "stale: 1; skipped 1" in lines

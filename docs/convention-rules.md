@@ -171,8 +171,10 @@ bookmarks when no group lists any) never filters
 
 Skipped when the report has no group containers.
 
-- `PNL001`: no visual is named `panel.group_name`.
-- `PNL002` (warning): it exists but is not a group.
+- `PNL001`: no visual is named `panel.group_name` (the message reads `No
+  y_filters_group master container found`).
+- `PNL002` (warning): it exists but is not a group (the message reads
+  `y_filters_group should be a group container, not specific visual`).
 
 `--fix` acts only when the check reports `PNL001`: a report that already has
 a visual named `panel.group_name` (whatever its folder is called) is left as

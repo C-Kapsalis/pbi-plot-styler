@@ -983,7 +983,7 @@ def check(
         for note in notes:
             click.echo(f"note: {note}", err=True)
         for note in skipped_notes:
-            if not note.startswith("stale-placeholders:"):
+            if "stale-placeholders:" not in note:
                 click.echo(f"skipped  {note}")
         for line in fix_lines:
             click.echo(line)

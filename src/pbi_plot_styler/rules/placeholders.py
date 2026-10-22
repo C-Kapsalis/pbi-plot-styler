@@ -9,6 +9,7 @@ skipped and never changed.
 """
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -80,9 +81,9 @@ def _skip(judge: _Judge, path: Path, role: str, axes: list[str], note: str) -> N
     """Record the placeholder a role cannot be repointed to."""
     judge.ctx.skip(f"stale-placeholders: {judge.ctx.rel(path)}: {role}: {note}")
     if note.startswith("ambiguous: axes"):
-        placeholders = note.split("offer ", 1)[-1].strip("[]").split(", ")
+        placeholders = ast.literal_eval(note.split("offer ", 1)[-1])
         judge.ctx.options.setdefault("placeholder_skips", []).append(
-            _Skip(path, role, axes, [p for p in placeholders if p], True))
+            _Skip(path, role, axes, list(placeholders), True))
         return
     judge.ctx.options.setdefault("placeholder_skips", []).append(
         _Skip(path, role, axes, [], False))
@@ -231,8 +232,9 @@ def _skip_lines(ctx: RuleContext) -> list[str]:
             lines.append(f"  SKIPPED {ctx.rel(skip.path)}: {skip.role}: [{axes}] offer "
                          f"{sorted(skip.placeholders)} — ambiguous")
         else:
+            table = ctx.settings.placeholders.blank_dimension_table
             lines.append(f"  SKIPPED {ctx.rel(skip.path)}: {skip.role}: [{axes}] offer no "
-                         f"placeholder")
+                         f"{table} placeholder")
     return lines
 
 
@@ -257,15 +259,18 @@ def _skip_line(ctx: RuleContext, skip: "_Skip") -> str:
     if skip.ambiguous:
         return (f"  SKIPPED {ctx.rel(skip.path)}: {skip.role}: [{axes}] offer "
                 f"{sorted(skip.placeholders)} — ambiguous")
-    return (f"  SKIPPED {ctx.rel(skip.path)}: {skip.role}: [{axes}] offer no placeholder")
+    table = ctx.settings.placeholders.blank_dimension_table
+    return (f"  SKIPPED {ctx.rel(skip.path)}: {skip.role}: [{axes}] offer no "
+            f"{table} placeholder")
 
 
 def render_placeholders(findings, counts, framing, values) -> list[str]:
-    """The per-file lines and the totals of a placeholder run."""
+    """The per-file lines, the findings and the totals of a placeholder run."""
     lines = list(counts.get("lines") or [])
     for line in counts.get("skips") or []:
         if line not in lines:
             lines.append(line)
+    lines += [framing(f) for f in findings]
     total = counts.get("stale", 0)
     skipped = len(counts.get("skips") or [])
     verb = "repointed" if values.get("fixing") else "stale"
