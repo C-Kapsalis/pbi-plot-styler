@@ -158,17 +158,21 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
     multiple=True,
     help="Field-parameter table name or shell-style pattern such as 'x-*' "
     "(repeatable; patterns match the model's tables case-insensitively). "
-    "Overrides the default 'x-Plot Specific 1' / 'x-Plot Specific 2' / "
-    "'y-Plot Specific' trio.",
+    "Restricts the styling to these tables. Without it (or [tables] "
+    "field_parameters), the field parameters are detected from the model's "
+    "TMDL and the metric ones drive the styling.",
 )
 @click.option(
     "--rename-table",
     "renames",
     multiple=True,
     metavar="OLD=NEW",
-    help="Rename one default field-parameter table (repeatable), for "
-    "example --rename-table \"y-Plot Specific=Set Lines\". Leaves the "
-    "other default table names in place, unlike --table.",
+    help="Rename one table of the --table or [tables] field_parameters list "
+    "(repeatable), for example --rename-table \"y-Plot Specific=Set Lines\", "
+    "leaving the rest of the list in place. Without such a list the field "
+    "parameters are detected from the model, so a renamed table is found "
+    "anyway; OLD must then be one of the legacy names x-Plot Specific 1, "
+    "x-Plot Specific 2 or y-Plot Specific.",
 )
 @click.option(
     "--visual-type",
@@ -268,8 +272,10 @@ def _parse_pairs(entries: tuple[str, ...], flag: str, example: str) -> dict[str,
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Print a unified diff of what would change; write nothing. "
-    "Exits 1 if any visual is out of style.",
+    help="Write nothing; print a WOULD CHANGE block per visual that would "
+    "change (the column measures kept out of the line set, the stale line "
+    "rebinds and the dataPoint / labels entry counts). Exits 1 if any visual "
+    "is out of style.",
 )
 @click.option(
     "--zip",
@@ -359,14 +365,17 @@ def style(
         raise StylerError(str(exc)) from exc
 
     within: Path | None = None
-    if report_dir.is_file() or not is_report_dir(report_dir) and enclosing_report(report_dir):
+    # The scope and its report are both taken from the absolute path, so a
+    # relative page folder, visual.json or `.` compares like an absolute one.
+    scope = report_dir.resolve()
+    if scope.is_file() or not is_report_dir(scope) and enclosing_report(scope):
         # a page folder or a visual file: restyle only what lies under it
-        enclosing = enclosing_report(report_dir)
+        enclosing = enclosing_report(scope)
         if enclosing is None:
             raise StylerError(
                 f"{report_dir} is not inside a *.Report folder. Pass a report "
                 f"folder, a folder of reports, a page folder or a visual.json.")
-        within, report_dir = report_dir.resolve(), enclosing
+        within, report_dir = scope, enclosing
     discovery = discover_reports(report_dir)
     if not discovery.reports:
         raise StylerError(
@@ -382,9 +391,10 @@ def style(
     skipped_visuals: list[str] = []
     #: visual files that do not parse: (path, the JSON error).
     unreadable: list[tuple[Path, str]] = []
-    # A report that cannot be paired with a model is skipped; a report whose
-    # model has no usable field parameters is an error unless the run sweeps
-    # several reports and no --model was named.
+    # A report that cannot be paired with a model, or whose model has no
+    # usable field parameters, is skipped only when the run sweeps several
+    # reports and no --model was named; a single report or --model makes it
+    # a fatal error.
     lenient = not discovery.single and model_dir is None
 
     for report in discovery.reports:
@@ -393,7 +403,9 @@ def style(
             if resolved_model not in models:
                 models[resolved_model] = SemanticModel.load(resolved_model)
             model = models[resolved_model]
-        except (FileNotFoundError, LookupError, OSError, ValueError):
+        except (FileNotFoundError, LookupError, OSError, ValueError) as exc:
+            if not lenient:
+                raise StylerError(str(exc)) from exc
             skipped_visuals += _combo_visuals(report, config.visual_types)
             continue
         try:
@@ -404,6 +416,8 @@ def style(
                 # original
                 tables = _expand_tables(config.field_parameter_tables, model)
                 field_parameters = tables
+                if tables:
+                    click.echo(f"Field parameters: {', '.join(tables)} (explicit)")
             else:
                 # no explicit list: the model's own field parameters are
                 # detected from its TMDL. The measures the styling drives
@@ -417,8 +431,8 @@ def style(
                 if detected.parameters:
                     click.echo(
                         f"Field parameters: {', '.join(detected.names)}"
-                        + (f" (dimension: {', '.join(detected.dimension_names)}; "
-                           f"metric: {', '.join(detected.metric_names)})"
+                        + (f" (dimension: {', '.join(detected.dimension_names) or 'none'}; "
+                           f"metric: {', '.join(detected.metric_names) or 'none'})"
                            if detected.metric or detected.mixed else ""))
             measure_keys = model.field_parameter_measures(tables) if tables else []
         except (FileNotFoundError, LookupError, OSError, ValueError) as exc:

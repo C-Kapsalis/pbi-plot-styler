@@ -6,8 +6,10 @@ import re
 from ..canvas import dig, read_json
 from . import RuleContext, rule_result_block
 
-#: A quoted hex colour literal in raw report.json text.
-_HEX_LITERAL = re.compile(r'"#[0-9A-Fa-f]{3,8}"')
+#: A quoted hex colour literal in raw report.json text: a JSON string
+#: ``"#00FF00"``, or a DAX literal ``"'#FF0000'"`` (how a hard-coded colour
+#: is saved in an ``expr.Literal.Value``).
+_HEX_LITERAL = re.compile(r'"(?:#[0-9A-Fa-f]{3,8}|\'#[0-9A-Fa-f]{3,8}\')"')
 _MAX_SAMPLES = 8
 
 

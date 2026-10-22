@@ -116,7 +116,7 @@ def test_a_clean_format_selector_run(client):
 def test_the_mode_gate_check_prints_the_source_and_the_totals(modes):
     out = run("check", modes, "--rule", "slicer-mode-gates").stdout
     assert "  gate source entity (from TMDL): 'f-Filters'" in out
-    assert "  Would patch 2 visual(s) and 0 bookmark entrie(s)" in out
+    assert "  Would patch 2 visual(s) and 0 bookmark entries" in out
     assert ("  Would patch 4 stale entity reference(s) -> 'f-Filters' across 2 file(s)"
             in out)
 

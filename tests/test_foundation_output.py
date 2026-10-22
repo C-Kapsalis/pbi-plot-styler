@@ -92,7 +92,7 @@ def test_the_compliance_keys_are_the_original_names(client):
 def test_the_category_filter_prints_its_result_block(client):
     VARIANTS["rule3-missing"](client)
     out = run("check", client, "--rule", "category-filter").stdout
-    assert "✅ Rule #3 Validation Results:" in out
+    assert "❌ Rule #3 Validation Results:" in out  # BUGFIX: the mark follows the result
     assert "   Components checked: 2" in out
     assert "   Compliant: False" in out
     assert "   Violations found:" in out

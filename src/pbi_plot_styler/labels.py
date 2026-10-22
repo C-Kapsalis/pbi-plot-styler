@@ -74,11 +74,15 @@ def rename_labels(
         text = raw.decode("utf-8-sig")
         original = text
         for old, new in ordered:
-            needle = f'"{old}"'
-            hits = text.count(needle)
+            # A quoted label that happens to sit in a JSON key position
+            # (``"OLD":``) is a field name, not a value: rewrite the values
+            # only, so a rename of a label such as "version" does not
+            # corrupt object keys.
+            pattern = re.compile(re.escape(f'"{old}"') + r"(?!\s*:)")
+            hits = len(pattern.findall(text))
             if hits:
                 totals[old] += hits
-                text = text.replace(needle, f'"{new}"')
+                text = pattern.sub(f'"{new}"', text)
         if text == original:
             continue
         if path.suffix == ".json":

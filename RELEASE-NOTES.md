@@ -1,5 +1,85 @@
 # Release notes
 
+## Unreleased
+
+### Fixed
+
+- BUGFIX: the `style --dry-run` line `columns-role measure(s) kept OUT of
+  the line set` lists only the column measures the write run really leaves
+  unstyled: the measures of an `--exclude-role` role and the column
+  measures no field parameter offers. Without `--exclude-role` it named a
+  column measure (`Sales Measures.Revenue` on the coffee-roastery example)
+  that the write run then styled (`0 columns-role measure(s) excluded`).
+- BUGFIX: `style` with a relative page folder or `visual.json` (or `.`
+  inside a page folder) styles the visuals under it. The scope was made
+  absolute but its report stayed relative, so no visual matched and the run
+  stopped with `no targeted visuals found` (exit `2`); an absolute path
+  worked.
+- BUGFIX: `style` on a single report, or with `--model`, stops with exit
+  `2` and the reason when the paired model cannot be used: no
+  `definition.pbir`, a model folder that is missing, or a model without a
+  `definition/tables` folder. It printed `SKIPPED - no paired
+  SemanticModel`, exited `0`, and a dry run even said `All 1 combo
+  chart(s) already in sync (1 skipped)`, although the 1.2.0 notes promise
+  that a single report or `--model` keeps the fatal error. A sweep of a
+  folder of reports without `--model` still skips such a report with its
+  `SKIPPED` lines, as documented.
+- BUGFIX: `check --rule slicer-mode-gates --fix` reports what it wrote.
+  On the mode-gates fixture it printed `Patched 2 visual(s) and 0 bookmark
+  entrie(s) across 0 file(s)` and `Patched 0 stale entity reference(s)`
+  while it rewrote three files: the stale references were counted after
+  they had been repointed, and the file count covered only bookmark files.
+  It now prints `Patched 2 visual(s) and 0 bookmark entries across 2
+  file(s)` (the files the gate pass patched) and `Patched 2 stale entity
+  reference(s) -> 'f-Filters' across 1 file(s)` (the references left after
+  the gate pass, as they are repointed). The check-mode line reads
+  `Would patch <n> visual(s) and <n> bookmark entries` (`1 bookmark
+  entry`) instead of `entrie(s)`.
+- `style` with an explicit field-parameter list (`--table` or `[tables]
+  field_parameters`) prints `Field parameters: <names> (explicit)`, the
+  line the 1.2.0 notes promise; it printed no field-parameter line at all.
+- Help and docs: `style --dry-run` describes the `WOULD CHANGE` block it
+  prints (the help still said it prints a unified diff, and so did the
+  README and the example's README); `--table` and `--rename-table`
+  describe the detection of the model's field parameters instead of the
+  old `x-Plot Specific` trio default; docs/commands.md gives the
+  `bookmarks build --self-test` output the right way round (the default
+  layout adds the generated name, the measures and the matrix row count;
+  the legacy layout prints `self-test PASS` only); the README's quickstart
+  output and its sweep `SKIPPED` line match what the tool prints.
+- BUGFIX: the `Violations found` line of `THM006` names only the theme
+  that is missing. It always said `missing: baseTheme, customTheme`, even
+  when the lint line above it said `missing: customTheme`. The `THM006`
+  remediation hint now says to declare the missing theme (`baseTheme` or
+  `customTheme`) in the `themeCollection` of `report.json`; it said to
+  restore the missing theme file, which is `THM001`'s remedy.
+- BUGFIX: the foundation rules' result block starts with `❌ Rule #<n>
+  Validation Results:` when the rule is not compliant; it printed `✅`
+  whatever the result.
+- BUGFIX: `check --rule format-selector --fix` prints its `<report.json>:
+  patched (<reason>)` line once; the generic `fixed ...` line repeated it.
+- The `Field parameters:` line says `none` for an empty kind
+  (`(dimension: none; metric: Metric Selector)`) instead of printing
+  `(dimension: ; ...)`.
+- STRICTER: `THM004` also counts a hex colour saved as a DAX literal
+  (`"'#FF0000'"`, the `expr.Literal.Value` form of a hard-coded colour),
+  not only a plain `"#00FF00"` string. The rule's documented intent is no
+  hard-coded colours in `report.json` (`Expected: ThemeDataColor references
+  only`, and its remedy replaces each `'#RGBHEX'` literal), and the DAX
+  literal is the form Power BI saves. A report with such literals gets a
+  `THM004` finding (or a higher count) where it had none; refresh a
+  baseline with `--update-baseline` if you accept them.
+- STRICTER: `BND001` also flags a saved selection that names a field as
+  text (`'Sales Measures'[Revenue]`, the value a field-parameter slicer or
+  its bookmark capture stores) when the table is in the model, is not a
+  field parameter, and no longer declares that field. After a measure was
+  renamed in the model only, `check` flagged the combo chart's binding but
+  not the slicer's saved selection that still named the old measure,
+  although the README says to run the check after a measure rename and
+  `rename-measure` rewrites that selection. Text on a table the model does
+  not declare, or on a field-parameter table (whose text names a row), is
+  not judged.
+
 ## 1.2.1 (2026-10-22)
 
 ### Fixed
