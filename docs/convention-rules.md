@@ -154,7 +154,8 @@ bookmarks when no group lists any) never filters
 - `THM005` (error): neither a base nor a custom theme.
 - `THM006` (error): the base or the custom theme is missing (names which).
 
-`--summary` counts only `THM002`, `THM003` and `THM004` in the theme row.
+`--summary` counts and lists only `THM002`, `THM003` and `THM004` in the
+theme row; `THM005` and `THM006` run under `--rule theme`.
 
 ## visual-position
 
@@ -322,6 +323,9 @@ bookmark file is a `JSN001` error.
 passed (failures among its critical ids) and whether it is compliant (no
 error finding at all), plus
 the overall percentage. It never fails; `--json` adds a `compliance` object.
+The finding lines, the closing `Checked` totals and the `--json` `findings`
+and `summary` carry only the ids the rows count, so they agree with the
+score.
 Each finding is followed by a one-line remediation hint (`fix:`; a `fix`
 field on each finding in `--json`).
 

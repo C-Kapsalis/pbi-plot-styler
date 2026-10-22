@@ -242,6 +242,40 @@ def test_summary_theme_row_counts_only_the_rule_6_checks(tmp_path):
     assert "THM006" in {f["id"] for f in payload["findings"]}
 
 
+def test_summary_findings_and_totals_agree_with_the_compliance(tmp_path):
+    # BUGFIX: --summary printed `ERROR THM006` and closed with "1 error(s)"
+    # under a 100.0% score; the summary counts only the rule-6 theme ids
+    client = copy_fixture("universal", tmp_path)
+    report_json = client / "-Report.Report" / "definition" / "report.json"
+    edit_json(report_json, lambda d: d["themeCollection"].pop("customTheme"))
+    result = run("check", client, "--summary")
+    assert result.exit_code == 0, result.output
+    assert "THM006" not in result.output
+    assert "WARNING  THM003" in result.output
+    assert "   Compliance Score: 100.0%" in result.output
+    assert "Checked 1 report(s): 0 error(s), 1 warning(s)." in result.output
+    payload = json.loads(run("check", client, "--summary", "--json").output)
+    assert [f["id"] for f in payload["findings"]] == ["THM003"]
+    assert (payload["summary"]["errors"], payload["summary"]["warnings"]) == (0, 1)
+    assert payload["exit_code"] == 0
+
+
+def test_summary_leaves_baseline_entries_of_the_unsummarised_ids_alone(tmp_path):
+    client = copy_fixture("universal", tmp_path)
+    report_json = client / "-Report.Report" / "definition" / "report.json"
+    edit_json(report_json, lambda d: d["themeCollection"].pop("customTheme"))
+    baseline = tmp_path / "b.json"
+    assert run("check", client, "--rule", "theme", "--baseline", baseline,
+               "--update-baseline").exit_code == 0
+    assert "THM006" in {e["id"] for e in load(baseline)["findings"]}
+    # a summary run neither calls the THM006 entry healed nor drops it
+    result = run("check", client, "--summary", "--baseline", baseline)
+    assert "THM006: 1 accepted finding(s) no longer occur" not in result.output
+    assert run("check", client, "--summary", "--baseline", baseline,
+               "--update-baseline").exit_code == 0
+    assert "THM006" in {e["id"] for e in load(baseline)["findings"]}
+
+
 # -- discovery ---------------------------------------------------------------------
 def test_a_bare_sweep_over_a_folder_without_reports_exits_0(tmp_path):
     empty = tmp_path / "empty"
