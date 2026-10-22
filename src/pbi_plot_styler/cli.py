@@ -431,8 +431,8 @@ def style(
                 if detected.parameters:
                     click.echo(
                         f"Field parameters: {', '.join(detected.names)}"
-                        + (f" (dimension: {', '.join(detected.dimension_names)}; "
-                           f"metric: {', '.join(detected.metric_names)})"
+                        + (f" (dimension: {', '.join(detected.dimension_names) or 'none'}; "
+                           f"metric: {', '.join(detected.metric_names) or 'none'})"
                            if detected.metric or detected.mixed else ""))
             measure_keys = model.field_parameter_measures(tables) if tables else []
         except (FileNotFoundError, LookupError, OSError, ValueError) as exc:

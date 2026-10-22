@@ -53,6 +53,22 @@
   remediation hint now says to declare the missing theme (`baseTheme` or
   `customTheme`) in the `themeCollection` of `report.json`; it said to
   restore the missing theme file, which is `THM001`'s remedy.
+- BUGFIX: the foundation rules' result block starts with `❌ Rule #<n>
+  Validation Results:` when the rule is not compliant; it printed `✅`
+  whatever the result.
+- BUGFIX: `check --rule format-selector --fix` prints its `<report.json>:
+  patched (<reason>)` line once; the generic `fixed ...` line repeated it.
+- The `Field parameters:` line says `none` for an empty kind
+  (`(dimension: none; metric: Metric Selector)`) instead of printing
+  `(dimension: ; ...)`.
+- STRICTER: `THM004` also counts a hex colour saved as a DAX literal
+  (`"'#FF0000'"`, the `expr.Literal.Value` form of a hard-coded colour),
+  not only a plain `"#00FF00"` string. The rule's documented intent is no
+  hard-coded colours in `report.json` (`Expected: ThemeDataColor references
+  only`, and its remedy replaces each `'#RGBHEX'` literal), and the DAX
+  literal is the form Power BI saves. A report with such literals gets a
+  `THM004` finding (or a higher count) where it had none; refresh a
+  baseline with `--update-baseline` if you accept them.
 
 ## 1.2.1 (2026-10-22)
 

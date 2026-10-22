@@ -173,7 +173,7 @@ def _registry() -> dict[str, Rule]:
              format_selector.fix_format_selector,
              render=format_selector.render_format_selector,
              render_fix=format_selector.render_format_selector_fix,
-             fix_summary=format_selector.format_selector_fix_summary),
+             replace_fix_lines=True, fix_summary=format_selector.format_selector_fix_summary),
         Rule("stale-placeholders", "saved state names a placeholder its axis offers",
              ("PLH001",), placeholders.check_placeholders, placeholders.fix_placeholders,
              ordered=True, render=placeholders.render_placeholders),
@@ -287,7 +287,7 @@ def rule_result_block(number: int, findings: list, counts: dict, framing, values
     critical = [f for f in findings if f.severity == "error"]
     passed = max(checked - len({f.location for f in critical}), 0)
     lines += [
-        f"✅ Rule #{number} Validation Results:",
+        f"{'❌' if critical else '✅'} Rule #{number} Validation Results:",
         f"   Components checked: {checked}",
         f"   Components passed: {passed}",
         f"   Compliant: {not critical}",

@@ -149,8 +149,10 @@ bookmarks when no group lists any) never filters
 
 - `THM002` (error): no `themeCollection`.
 - `THM003` (warning): no `customTheme`.
-- `THM004` (error): `report.json` holds quoted hex colour literals; one
-  finding with the count and up to 8 samples.
+- `THM004` (error): `report.json` holds quoted hex colour literals, either
+  a JSON string (`"#00FF00"`) or a DAX literal (`"'#FF0000'"`, how a
+  hard-coded colour is saved); one finding with the count and up to 8
+  samples.
 - `THM005` (error): neither a base nor a custom theme.
 - `THM006` (error): the base or the custom theme is missing (names which).
 

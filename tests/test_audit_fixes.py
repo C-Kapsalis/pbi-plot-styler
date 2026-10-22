@@ -217,3 +217,49 @@ def test_the_thm006_hint_says_to_declare_the_theme():
     hint = fix_hint("THM006")
     assert "themeCollection" in hint and "report.json" in hint, hint
     assert "restore the missing theme file" not in hint
+
+
+# -- 7: minor output fixes ----------------------------------------------------------
+def test_a_non_compliant_rule_block_carries_a_cross(roastery):
+    out = _run("check", roastery / "Roastery.Report", "--rule", "theme").stdout
+    assert "❌ Rule #6 Validation Results:" in out, out
+    assert "✅ Rule #6" not in out
+    clean = _run("check", roastery / "Roastery.Report", "--rule", "category-filter").stdout
+    assert "✅ Rule #3 Validation Results:" in clean, clean
+
+
+def test_the_format_selector_fix_prints_its_patched_line_once(tmp_path):
+    import json
+
+    root = tmp_path / "universal"
+    shutil.copytree(FIXTURES / "universal", root)
+    report_json = root / "-Report.Report" / "definition" / "report.json"
+    data = json.loads(report_json.read_text(encoding="utf-8"))
+    data.pop("filterConfig", None)
+    report_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    out = _run("check", root / "-Report.Report", "--rule", "format-selector", "--fix").stdout
+    patched = [ln for ln in out.splitlines() if "patched (" in ln]
+    assert len(patched) == 1, out
+    assert "Patched 1/1 report(s)." in out
+
+
+def test_an_empty_parameter_kind_reads_none(roastery):
+    tables = roastery / "Roastery.SemanticModel" / "definition" / "tables"
+    (tables / "y-Plot Specific.tmdl").unlink()  # the only dimension parameter
+    out = _run("style", roastery / "Roastery.Report", "--dry-run").output
+    line = out.splitlines()[0]
+    assert line == ("Field parameters: x-Plot Specific 1, x-Plot Specific 2 "
+                    "(dimension: none; metric: x-Plot Specific 1, x-Plot Specific 2)"), out
+
+
+def test_thm004_counts_a_dax_colour_literal(roastery):
+    import json
+
+    report_json = roastery / "Roastery.Report" / "definition" / "report.json"
+    data = json.loads(report_json.read_text(encoding="utf-8"))
+    data.setdefault("objects", {})["outspacePane"] = [{"properties": {"backgroundColor": {
+        "solid": {"color": {"expr": {"Literal": {"Value": "'#FF0000'"}}}}}}}]
+    report_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    out = _run("check", roastery / "Roastery.Report", "--rule", "theme").stdout
+    assert "THM004" in out, out
+    assert "1 hard-coded hex color literal(s) in report.json (sample: \"'#FF0000'\")" in out
