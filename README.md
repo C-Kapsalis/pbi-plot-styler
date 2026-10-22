@@ -282,7 +282,7 @@ import or render time:
 | Id | Severity | Finding |
 |---|---|---|
 | `JSN001` | error | A report file is not valid JSON |
-| `BND001` | error | A field reference (table plus measure, column, or hierarchy level, including filters' `From` aliases) does not resolve in the paired model |
+| `BND001` | error | A field reference (table plus measure, column, or hierarchy level, including filters' `From` aliases, and a saved selection that names a field as text, such as a field-parameter slicer's `'Sales Measures'[Revenue]`, on a table that is not a field parameter) does not resolve in the paired model |
 | `BND002` | error | A `queryRef` or `selector.metadata` string does not resolve |
 | `BMK001` | error | A bookmark `options` key is outside the allowed set (fixable) |
 | `BMK002` | error | A bookmark `howCreated`, `ComparisonKind` or `Version` is a string, not an integer (fixable when numeric) |

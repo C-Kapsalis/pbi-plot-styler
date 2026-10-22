@@ -69,6 +69,16 @@
   literal is the form Power BI saves. A report with such literals gets a
   `THM004` finding (or a higher count) where it had none; refresh a
   baseline with `--update-baseline` if you accept them.
+- STRICTER: `BND001` also flags a saved selection that names a field as
+  text (`'Sales Measures'[Revenue]`, the value a field-parameter slicer or
+  its bookmark capture stores) when the table is in the model, is not a
+  field parameter, and no longer declares that field. After a measure was
+  renamed in the model only, `check` flagged the combo chart's binding but
+  not the slicer's saved selection that still named the old measure,
+  although the README says to run the check after a measure rename and
+  `rename-measure` rewrites that selection. Text on a table the model does
+  not declare, or on a field-parameter table (whose text names a row), is
+  not judged.
 
 ## 1.2.1 (2026-10-22)
 

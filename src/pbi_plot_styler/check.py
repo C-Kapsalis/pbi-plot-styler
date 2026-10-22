@@ -8,8 +8,11 @@ Id      Severity  Finding
 ======  ========  ==========================================================
 JSN001  error     A report file is not valid JSON.
 MDL001  error     The paired semantic model exists but cannot be loaded.
-BND001  error     A field reference (``SourceRef`` entity plus property, or
-                  a ``From`` entity) does not resolve in the paired model.
+BND001  error     A field reference (``SourceRef`` entity plus property, a
+                  ``From`` entity, or a saved selection literal such as
+                  ``'Table'[Field]`` on a table the model declares that is
+                  not a field parameter) does not resolve in the paired
+                  model.
 BND002  error     A ``queryRef`` or ``selector.metadata`` string does not
                   resolve in the paired model.
 BMK001  error     A bookmark ``options`` key is outside the allowed set.
@@ -184,21 +187,44 @@ def _entity(expr: Any, aliases: dict[str, str]) -> tuple[str | None, bool]:
     return None, False
 
 
+#: A field reference saved as text: ``'Table'[Field]`` or ``Table[Field]``,
+#: as a field-parameter slicer stores its selection (the row's NAMEOF text).
+_FIELD_TEXT = re.compile(
+    r"^(?:'((?:[^']|'')+)'|([A-Za-z_][A-Za-z0-9_]*))\[((?:[^\]]|\]\])+)\]$")
+
+
+def _literal_field(value: Any) -> tuple[str, str] | None:
+    """``(table, field)`` when a ``Literal`` value is a DAX string holding a
+    field reference, such as ``'''Sales Measures''[Revenue]'``."""
+    if not isinstance(value, str) or len(value) < 2 \
+            or not (value.startswith("'") and value.endswith("'")):
+        return None
+    match = _FIELD_TEXT.match(value[1:-1].replace("''", "'"))
+    if not match:
+        return None
+    table = (match.group(1) or match.group(2)).replace("''", "'")
+    return table, match.group(3).replace("]]", "]")
+
+
 def _iter_binding_problems(
     node: Any,
     model: SemanticModel,
     aliases: dict[str, str] | None = None,
     extensions: frozenset[str] = frozenset(),
+    parameters: frozenset[str] = frozenset(),
 ) -> Iterator[tuple[str, str, str]]:
     """Yield ``(check_id, subject, message)`` for every unresolved binding.
 
     ``extensions`` holds lower-cased ``"table.measure"`` keys of report-level
-    measures, which resolve without being in the model.
+    measures, which resolve without being in the model. ``parameters`` holds
+    the lower-cased names of the model's field-parameter tables, whose saved
+    selection text names a row, not a field.
     """
     aliases = aliases or {}
     if isinstance(node, list):
         for item in node:
-            yield from _iter_binding_problems(item, model, aliases, extensions)
+            yield from _iter_binding_problems(item, model, aliases, extensions,
+                                              parameters)
         return
 
     def resolves(ref: str) -> bool:
@@ -256,6 +282,23 @@ def _iter_binding_problems(
                     f"level {level['Level']!r} is not in hierarchy {name!r}",
                 )
 
+    # A saved selection that names a field as text (a field-parameter
+    # slicer's selected row) breaks when that field is renamed in the model.
+    # Only a table the model declares is judged, and never a field-parameter
+    # table (its text names a row): other text is a value.
+    literal = node.get("Literal")
+    named = _literal_field(literal.get("Value")) if isinstance(literal, dict) else None
+    if named is not None and model.table_named(named[0]) is not None \
+            and model.table_named(named[0]).lower() not in parameters \
+            and model.field_kind(*named) is None:
+        table, name = model.table_named(named[0]), named[1]
+        yield (
+            "BND001",
+            f"{table}[{name}]",
+            f"saved selection names {name!r}, which is not declared on table "
+            f"{table!r}",
+        )
+
     has_field = isinstance(node.get("field"), dict) and any(
         k in node["field"]
         for k in ("Measure", "Column", "Aggregation", "HierarchyLevel")
@@ -274,7 +317,8 @@ def _iter_binding_problems(
             )
 
     for value in node.values():
-        yield from _iter_binding_problems(value, model, aliases, extensions)
+        yield from _iter_binding_problems(value, model, aliases, extensions,
+                                          parameters)
 
 
 def _check_field(
@@ -490,7 +534,8 @@ def _check_bindings(ctx: ReportContext, path: Path, data: Any) -> None:
     if ctx.model is None:
         return
     for check_id, subject, message in _iter_binding_problems(
-        data, ctx.model, extensions=ctx.extensions
+        data, ctx.model, extensions=ctx.extensions,
+        parameters=frozenset(name.lower() for name in ctx.field_parameters()),
     ):
         ctx.add(check_id, path, subject, message)
 

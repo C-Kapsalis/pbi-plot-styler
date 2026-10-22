@@ -209,6 +209,9 @@ def test_the_thm006_violation_line_names_only_the_missing_theme(roastery):
     assert violations == [
         "   \U0001F534 report: Theme collection is incomplete - missing: customTheme. "
         "Reports must declare both baseTheme and customTheme."], out
+    # the lint line, the violation line and the failure block agree
+    assert out.count("missing: customTheme.") == 3, out
+    assert "missing: baseTheme" not in out
 
 
 def test_the_thm006_hint_says_to_declare_the_theme():
@@ -263,3 +266,55 @@ def test_thm004_counts_a_dax_colour_literal(roastery):
     out = _run("check", roastery / "Roastery.Report", "--rule", "theme").stdout
     assert "THM004" in out, out
     assert "1 hard-coded hex color literal(s) in report.json (sample: \"'#FF0000'\")" in out
+
+
+# -- 8: a saved selection that names a renamed measure is a broken binding ------
+SLICER = "17b0cc8e254693190c00"
+
+
+def _rename_in_model(roastery: Path, old: str, new: str) -> None:
+    """Rename a measure in the model only, as Power BI Desktop would."""
+    tables = roastery / "Roastery.SemanticModel" / "definition" / "tables"
+    for tmdl in tables.glob("*.tmdl"):
+        text = tmdl.read_text(encoding="utf-8")
+        text = text.replace(f"[{old}]", f"[{new}]").replace(
+            f"measure {old} =", f"measure '{new}' =")
+        tmdl.write_text(text, encoding="utf-8")
+
+
+def test_check_flags_a_saved_selection_naming_a_renamed_measure(roastery):
+    import json
+
+    _rename_in_model(roastery, "Revenue", "Net Revenue")
+    result = _run("check", roastery / "Roastery.Report", "--json")
+    assert result.exit_code == 1, result.output
+    findings = json.loads(result.output)["findings"]
+    slicer = [f for f in findings if f"/{SLICER}/" in f["file"]]
+    assert [(f["id"], f["subject"]) for f in slicer] == [
+        ("BND001", "Sales Measures[Revenue]")], findings
+    assert "saved selection" in slicer[0]["message"]
+    # rename-measure repairs the report, and the check is clean again
+    renamed = _run("rename-measure", "Revenue", "Net Revenue",
+                   "--model", roastery / "Roastery.SemanticModel")
+    assert renamed.exit_code == 0, renamed.output
+    again = _run("check", roastery / "Roastery.Report")
+    assert again.exit_code == 0, again.output
+
+
+def test_a_selection_of_a_declared_field_is_not_flagged(roastery):
+    result = _run("check", roastery / "Roastery.Report")
+    assert result.exit_code == 0, result.output
+    assert "BND001" not in result.output
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("'''Sales Measures''[Revenue]'", ("Sales Measures", "Revenue")),
+    ("'''Client''''s Measures''[A]]B]'", ("Client's Measures", "A]B")),
+    ("'Beans[Origin Country]'", ("Beans", "Origin Country")),
+    ("'Plain text'", None),
+    ("42L", None),
+])
+def test_a_selection_literal_is_read_as_a_field(value, expected):
+    from pbi_plot_styler.check import _literal_field
+
+    assert _literal_field(value) == expected
