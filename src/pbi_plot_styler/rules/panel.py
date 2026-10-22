@@ -236,8 +236,8 @@ def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
 
 def render_filter_panel(findings, counts, framing, values) -> list[str]:
     """The result block and the failure block of the filter-panel rule."""
-    lines = rule_result_block(8, findings, counts, framing, violations=False,
-                             failure=False)
+    lines = rule_result_block(8, findings, counts, framing, values,
+                             violations=False, failure=False)
     critical = [f for f in findings if f.severity == "error"]
     if not critical or values.get("fixing"):
         return lines

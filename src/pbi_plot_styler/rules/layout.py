@@ -162,4 +162,4 @@ def render_y_combo(findings, counts, framing, values) -> list[str]:
 
 def render_theme(findings, counts, framing, values) -> list[str]:
     """The result block and the failure block of the theme rule."""
-    return rule_result_block(6, findings, counts, framing)
+    return rule_result_block(6, findings, counts, framing, values)

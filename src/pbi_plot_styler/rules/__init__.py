@@ -272,18 +272,21 @@ def finding_type(check_id: str) -> tuple[str | None, str | None, str | None]:
     return FINDING_TYPES.get(check_id, (None, None, None))
 
 
-def rule_result_block(number: int, findings: list, counts: dict, framing, *,
+def rule_result_block(number: int, findings: list, counts: dict, framing, values, *,
                       violations: bool = True, failure: bool = True) -> list[str]:
     """The result block and the failure block of one foundation rule.
 
     The result block counts the components the rule judged; the failure
     block lists the error findings, once. The findings themselves keep the
-    lint framing and come first.
+    lint framing and come first. A summary run prints the compliance
+    report instead, so only the findings are printed here.
     """
+    lines = [framing(f) for f in findings]
+    if values.get("summary"):
+        return lines
     checked = counts.get("components", 0)
     critical = [f for f in findings if f.severity == "error"]
     passed = max(checked - len({f.location for f in critical}), 0)
-    lines = [framing(f) for f in findings]
     lines += [
         f"✅ Rule #{number} Validation Results:",
         f"   Components checked: {checked}",

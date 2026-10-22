@@ -119,4 +119,4 @@ def check_category_filter(ctx: RuleContext) -> None:
 
 def render_category_filter(findings, counts, framing, values) -> list[str]:
     """The result block and the failure block of the category-filter rule."""
-    return rule_result_block(3, findings, counts, framing)
+    return rule_result_block(3, findings, counts, framing, values)
