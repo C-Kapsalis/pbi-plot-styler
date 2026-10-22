@@ -100,20 +100,61 @@ def _reverse_order(name: str) -> tuple[int, ...]:
     return tuple(-ord(ch) for ch in name) + (1,)
 
 
+def _step(name: str) -> str:
+    """A step name padded to 13 columns (a longer name is not padded)."""
+    return name if len(name) >= 13 else name.ljust(13)
+
+
 def render_filter_panel_fix(ctx: RuleContext, changes: list[tuple[Path, str]]) -> list[str]:
-    """The outcome of a filter-panel fix."""
+    """The block the filter-panel fixer prints before it writes, and its outcome.
+
+    The steps are the ones the fixer takes: the master, its children, the
+    bookmark files and the move of the master's folder.
+    """
+    plan = ctx.options.get("panel_plan")
+    lines: list[str] = []
+    if plan:
+        prefix = "  [dry-run] " if ctx.options.get("dry_run") else "  "
+        lines += [prefix + f"── {plan['report']}",
+                  prefix + f"detect {plan['report']} (main page={plan['page']}): "
+                           f"master={plan['master']} displayName={plan['display']} "
+                           f"covers={plan['covers']}"]
+        for name, path in plan["steps"]:
+            lines.append(f"{prefix}edit {_step(name)} {ctx.rel(ctx.report_dir / path)}")
+        if plan["move"]:
+            old, new = plan["move"]
+            gap = "  " if ctx.options.get("dry_run") else "   "
+            lines.append(f"{prefix}mv{gap}{ctx.rel(ctx.report_dir / old)} -> {new}/")
     if ctx.options.get("panel_fixed"):
-        return ["Auto-fix SUCCEEDED — y_filters_group master container in place. "
-                "Commit the modified report files."]
-    lines = ["Rule #8 auto-fix did NOT resolve the violation:"]
-    for finding in ctx.findings:
-        if finding.check_id == "PNL001":
-            lines.append(f"  - {finding.subject}: {finding.message}")
-    if len(lines) == 1:
-        lines.append("  - report: No y_filters_group master container found "
-                     "(Expected: y_filters_group group container "
-                     "(visualGroup.displayName == 'y_filters_group'), Got: not found)")
+        lines.append("Auto-fix SUCCEEDED — y_filters_group master container in place. "
+                     "Commit the modified report files.")
+    else:
+        left = [f for f in ctx.findings if f.check_id == "PNL001"]
+        if left:
+            lines.append("Rule #8 auto-fix did NOT resolve the violation:")
+            for finding in left:
+                lines.append(f"  - {finding.subject}: {finding.message}")
     return lines
+
+
+def filter_panel_fix_summary(contexts: dict) -> list[str]:
+    """The trailer of a filter-panel run."""
+    changed = False
+    planned = False
+    dry = False
+    for factory in contexts.values():
+        ctx = factory()
+        if ctx.options.get("panel_fixed"):
+            changed = True
+        if ctx.options.get("panel_plan"):
+            planned = True
+        if ctx.options.get("dry_run"):
+            dry = True
+    if dry and planned:
+        return ["", "(dry-run) re-run without --dry-run to apply."]
+    if changed:
+        return []
+    return ["", "Nothing to do (no eligible master groups found, or all already named)."]
 
 
 def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
@@ -155,6 +196,8 @@ def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
 
     changes: list[tuple[Path, str]] = []
     ctx.options["panel_fixed"] = True
+    steps: list[tuple[str, Path]] = [
+        ("edit_master", master.path.relative_to(ctx.report_dir))]
     master.data["name"] = target
     master.data.setdefault("visualGroup", {})["displayName"] = target
     # this fixer writes visual files with non-ASCII text escaped
@@ -165,6 +208,7 @@ def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
         for visual in page.visuals:
             if visual.parent == old and visual is not master:
                 visual.data["parentGroupName"] = target
+                steps.append(("edit_parent", visual.path.relative_to(ctx.report_dir)))
                 if rewrite_json(visual.path, visual.data, ascii_only=True):
                     changes.append((visual.path, f"parentGroupName {old!r} -> {target!r}"))
         bookmarks = ctx.report_dir / "definition" / "bookmarks"
@@ -173,8 +217,19 @@ def fix_filter_panel(ctx: RuleContext) -> list[tuple[Path, str]]:
             raw = path.read_bytes()
             text = raw.decode("utf-8")
             if quoted_old in text:
+                steps.append(("edit_bookmark", path.relative_to(ctx.report_dir)))
                 path.write_bytes(text.replace(quoted_old, quoted_new).encode("utf-8"))
                 changes.append((path, f"{quoted_old} -> {quoted_new}"))
+        ctx.options["panel_plan"] = {
+            "report": ctx.report_dir.name,
+            "page": repr(page.page_id[:12]),
+            "master": repr(old[:10]),
+            "display": repr(display) if display is not None else "None",
+            "covers": repr(sorted(covered)),
+            "steps": steps,
+            "move": (master.path.parent.relative_to(ctx.report_dir), target)
+                    if old != target else None,
+        }
         master.path.parent.rename(master.path.parent.with_name(target))
     return changes
 

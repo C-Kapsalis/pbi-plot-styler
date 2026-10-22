@@ -788,6 +788,7 @@ def check(
 
     options: dict = {}
     options["check_path"] = path
+    options["dry_run"] = "1" if dry_run else ""
     try:
         builder = load_builder_settings(config_path)
         options["picker_labels"] = {vid: key for key, vid in builder.pickers.items()}
@@ -853,6 +854,10 @@ def check(
             raise StylerError(f"{exc}. --fix stopped before writing: nothing was written.") from exc
         if dry_run:
             planned, diffs, refused = _plan_fixes(reports, root, fixers, contexts, keep_notes)
+            for report in reports:
+                for rule in fixers:
+                    if rule.render_fix is not None:
+                        fix_lines += rule.render_fix(contexts[report](), [])
         else:
             try:
                 for report in reports:
@@ -982,8 +987,6 @@ def check(
                 click.echo(f"skipped  {note}")
         for line in fix_lines:
             click.echo(line)
-        for line in fix_summary_lines:
-            click.echo(line)
         for p, d in planned:
             click.echo(f"would fix {p.relative_to(root).as_posix()}: {d}")
         for diff in diffs:
@@ -992,6 +995,8 @@ def check(
             click.echo(f"REFUSED  {p.relative_to(root).as_posix()}: {r}")
         for line in _finding_lines(registry, slugs, new, details, settings, path, fix,
                                    summary):
+            click.echo(line)
+        for line in fix_summary_lines:
             click.echo(line)
         by_id: dict[str, list[str]] = {}
         for check_id, location in healed:

@@ -112,6 +112,17 @@
   slicer visuals; a bookmark capture never counts against one. The
   report's marks are written as UTF-8, so they print on a console that is
   not.
+- **The filter-panel fixer prints its block before it writes**: the
+  `── <report>` header, the `detect <report> (main page=<id>): master=<id>
+  displayName=<name> covers=[...]` line, the `edit edit_master`,
+  `edit edit_parent` and `edit edit_bookmark` steps and the
+  `mv <old folder> -> y_filters_group/` move. A dry run prefixes every
+  step with `[dry-run]` and ends with `(dry-run) re-run without --dry-run
+  to apply.`; a run that changed nothing ends with `Nothing to do (no
+  eligible master groups found, or all already named).`
+- **`bookmarks build --self-test` prints the earlier report's lines**: the
+  generated name, the measures and the matrix row count of the category
+  layout; the funnel (legacy) layout prints `self-test PASS` only.
 - **The foundation rules print their result block.** `category-filter`,
   `theme` and `filter-panel` print `✅ Rule #3 Validation Results:` with
   the components checked, the components passed, whether the rule is

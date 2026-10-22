@@ -7,6 +7,30 @@ no `*.Report` folder prints that there is nothing to check and exits `0`; a
 `--report` or `--model-name` filter that matches nothing exits `2`. Reports
 are found at any depth.
 
+## The convention rules
+
+`check --rule SLUG` runs one convention rule. The four that carry the
+canvas conventions describe themselves as follows:
+
+- `slicer-gates`: Enforce the `f-Slicer > 0` visual-level gate on every
+  Report field-parameter slicer (foundation rule #1). Check: scan only;
+  exit 1 if any Report slicer lacks the gate. Fix: inject the gate into
+  every violating slicer in place.
+- `slicer-mode-gates`: Enforce the owner's slicer-gate convention across a
+  report. Dropdown slicer -> visual-level filter `[f-Slicer] > 0`.
+  Vertical-list slicer -> visual-level filter `[f-All] > 0`.
+- `format-selector`: Enforce the z-Selector Format='Format' report-level
+  filter across every Report report. Check: scan only; exit 1 if any
+  report lacks the filter. Fix: add or repair the filter on every report
+  under PATH.
+- `stale-placeholders`: `pbi-plot-styler check --rule stale-placeholders
+  --fix` — repoint a saved blank-dimension binding. The path is a client
+  folder or a `*.Report` directory.
+
+The other rules (`category-filter`, `theme`, `visual-position`, `y-combo`,
+`filter-panel`, `answer-bookmarks`, `bookmark-literals`) are described in
+`docs/convention-rules.md`.
+
 ## colors sync / colors reset
 
 ```bash

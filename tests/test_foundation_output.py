@@ -205,3 +205,28 @@ def test_a_missing_folder_is_a_usage_error(tmp_path):
     result = run("rename-label", tmp_path / "nodir", "--pair", "a", "b")
     assert result.exit_code == 2
     assert "does not exist" in result.stderr
+
+
+# -- SCX80: the filter-panel fixer's block -----------------------------------------------
+def test_the_filter_panel_fixer_prints_its_block(client):
+    VARIANTS["rule8-renamed"](client)
+    out = run("check", client, "--rule", "filter-panel", "--fix").stdout
+    lines = out.splitlines()
+    assert lines[0] == "  ── -Report.Report"
+    assert lines[1].startswith("  detect -Report.Report (main page=")
+    assert "master='g1' displayName='Filters' covers=['y-Selector 3', " \
+           "'y-Selector 4', 'y-Selector 5', 'y-Selector 6']" in lines[1]
+    assert lines[2].startswith("  edit edit_master   ")
+    assert any(ln.startswith("  edit edit_parent   ") for ln in lines)
+    assert any(ln.startswith("  edit edit_bookmark ") for ln in lines)
+    assert any(ln.startswith("  mv   ") and "-> y_filters_group/" in ln for ln in lines)
+
+
+def test_the_filter_panel_dry_run_prefixes_every_step(client):
+    VARIANTS["rule8-renamed"](client)
+    out = run("check", client, "--rule", "filter-panel", "--fix", "--dry-run").stdout
+    lines = out.splitlines()
+    assert lines[0] == "  [dry-run] ── -Report.Report"
+    assert lines[2].startswith("  [dry-run] edit edit_master   ")
+    assert any(ln.startswith("  [dry-run] mv  ") for ln in lines)
+    assert "(dry-run) re-run without --dry-run to apply." in out
