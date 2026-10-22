@@ -109,10 +109,19 @@ def test_a_dry_run_prints_the_block_of_every_changed_visual(universal):
 
 
 def test_the_columns_role_line_lists_the_column_measures(project, report_dir):
-    result = _run("style", report_dir, "--dry-run")
+    result = _run("style", report_dir, "--dry-run", "--exclude-role", "Y")
     assert result.exit_code == 1, result.stdout
     assert "    columns-role measure(s) kept OUT of the line set: " \
            "Sales Measures.Bags Sold #" in result.stdout
+
+
+def test_the_columns_role_line_omits_a_column_measure_the_line_set_styles(
+        project, report_dir):
+    # BUGFIX: without --exclude-role the write run styles Bags Sold #, so the
+    # dry run must not say it is kept out.
+    result = _run("style", report_dir, "--dry-run")
+    assert result.exit_code == 1, result.stdout
+    assert "kept OUT" not in result.stdout
 
 
 # -- SCX38: the closing lines ----------------------------------------------------

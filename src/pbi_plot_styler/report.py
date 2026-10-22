@@ -559,8 +559,8 @@ class VisualChange:
     counts: tuple[tuple[str, int, int], ...] = ()
     #: the measures this visual styles (the line set).
     styled: tuple[str, ...] = ()
-    #: the column-side measures, including the ones the model declares but
-    #: the field parameters do not offer.
+    #: the column-side measures left out of the line set: the excluded ones
+    #: and the column measures the field parameters do not offer.
     column_side: tuple[str, ...] = ()
     #: the no-selector and data-scoped entries the rebuild kept.
     bar_side: int = 0
@@ -688,7 +688,11 @@ def plan_changes(
         counts = tuple((card, len(before_objects.get(card) or []),
                         len(after_objects.get(card) or [])) for card in ("dataPoint", "labels"))
         styled = sorted(set(measure_keys) - excluded)
-        column_side = sorted(set(_measure_keys_of(source, config.column_role)) | excluded)
+        # the column measures this visual really leaves unstyled: the
+        # excluded ones and the column measures outside the line set. A
+        # column measure the line set styles is not kept out.
+        column_side = sorted(
+            (set(_measure_keys_of(source, config.column_role)) - set(styled)) | excluded)
         bar_side = _bar_side_count(before_objects.get("dataPoint") or [],
                                    after_objects.get("dataPoint") or [],
                                    seed_default=False) + _bar_side_count(

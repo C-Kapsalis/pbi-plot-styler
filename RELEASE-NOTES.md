@@ -1,5 +1,16 @@
 # Release notes
 
+## Unreleased
+
+### Fixed
+
+- BUGFIX: the `style --dry-run` line `columns-role measure(s) kept OUT of
+  the line set` lists only the column measures the write run really leaves
+  unstyled: the measures of an `--exclude-role` role and the column
+  measures no field parameter offers. Without `--exclude-role` it named a
+  column measure (`Sales Measures.Revenue` on the coffee-roastery example)
+  that the write run then styled (`0 columns-role measure(s) excluded`).
+
 ## 1.2.1 (2026-10-22)
 
 ### Fixed
